@@ -398,6 +398,27 @@ textarea {
   border-bottom-left-radius: 4px;
 }
 
+.streaming-cursor {
+  display: inline-block;
+  width: 0.55ch;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: -0.12em;
+  background: #374151;
+  animation: streamCursorBlink 1s steps(1, end) infinite;
+}
+
+@keyframes streamCursorBlink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
 .message-tags {
   margin-top: 0.5rem;
   display: flex;

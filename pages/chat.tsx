@@ -18,11 +18,27 @@ interface DisplayMessage {
   content: string;
   content_blocks?: ContentBlock[];
   sources?: string[];
+  isStreaming?: boolean;
 }
 
 const SOURCE_TAG_CACHE_KEY = 'sourceTagCacheByConversation';
 
 type SourceTagCache = Record<string, Record<string, string[]>>;
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  if (error && typeof error === 'object' && 'errors' in error) {
+    const maybeErrors = (error as { errors?: Array<{ detail?: string; title?: string }> }).errors;
+    if (Array.isArray(maybeErrors) && maybeErrors.length > 0) {
+      return maybeErrors[0].detail || maybeErrors[0].title || 'Request failed';
+    }
+  }
+
+  return 'Failed to send message. Please try again.';
+}
 
 function getSourceTagCache(): SourceTagCache {
   if (typeof window === 'undefined') {
@@ -270,11 +286,79 @@ export default function Chat() {
     };
     setMessages(prev => [...prev, tempUserMsg]);
 
+    const streamingAssistantId = `stream-${Date.now()}`;
+    setMessages(prev => [
+      ...prev,
+      {
+        id: streamingAssistantId,
+        role: 'assistant',
+        content: '',
+        isStreaming: true,
+      },
+    ]);
+
+    const streamChunkQueue: string[] = [];
+    let streamFlushTimer: ReturnType<typeof setInterval> | null = null;
+    let streamDrainResolver: (() => void) | null = null;
+
+    const resolveDrainIfIdle = () => {
+      if (streamChunkQueue.length === 0 && !streamFlushTimer && streamDrainResolver) {
+        const resolve = streamDrainResolver;
+        streamDrainResolver = null;
+        resolve();
+      }
+    };
+
+    const stopStreamFlush = () => {
+      if (streamFlushTimer) {
+        clearInterval(streamFlushTimer);
+        streamFlushTimer = null;
+      }
+      resolveDrainIfIdle();
+    };
+
+    const startStreamFlush = () => {
+      if (streamFlushTimer) {
+        return;
+      }
+
+      streamFlushTimer = setInterval(() => {
+        const nextChunk = streamChunkQueue.shift();
+        if (!nextChunk) {
+          stopStreamFlush();
+          return;
+        }
+
+        setMessages(prev => prev.map((msg) => (
+          msg.id === streamingAssistantId
+            ? { ...msg, content: `${msg.content}${nextChunk}` }
+            : msg
+        )));
+      }, 70);
+    };
+
+    const waitForStreamDrain = async () => {
+      if (streamChunkQueue.length === 0 && !streamFlushTimer) {
+        return;
+      }
+
+      await new Promise<void>((resolve) => {
+        streamDrainResolver = resolve;
+      });
+    };
+
     try {
-      const response: AskResponse = await apiClient.ask({
+      const response: AskResponse = await apiClient.askStream({
         message: userMessage,
         conversation_id: currentConversationId || undefined,
+      }, {
+        onDelta: (chunk: string) => {
+          streamChunkQueue.push(chunk);
+          startStreamFlush();
+        },
       });
+
+      await waitForStreamDrain();
 
       // Update conversation ID if new
       if (!currentConversationId) {
@@ -306,13 +390,19 @@ export default function Chat() {
         persistSourceTags(targetConversationId, assistantMsg.id, assistantMsg.sources);
       }
 
-      setMessages(prev => [...prev, assistantMsg]);
+      setMessages(prev => prev.map((msg) => (
+        msg.id === streamingAssistantId
+          ? assistantMsg
+          : msg
+      )));
     } catch (error) {
+      stopStreamFlush();
       console.error('Failed to send message:', error);
-      // Remove optimistic user message on error
-      setMessages(prev => prev.filter(m => m.id !== tempUserMsg.id));
-      alert('Failed to send message. Please try again.');
+      // Remove optimistic messages on error
+      setMessages(prev => prev.filter(m => m.id !== tempUserMsg.id && m.id !== streamingAssistantId));
+      alert(getErrorMessage(error));
     } finally {
+      stopStreamFlush();
       setIsSending(false);
     }
   };
@@ -452,7 +542,12 @@ export default function Chat() {
                   {message.content_blocks ? (
                     <ContentBlockRenderer blocks={message.content_blocks} />
                   ) : (
-                    message.content
+                    <>
+                      {message.content}
+                      {message.isStreaming && (
+                        <span className="streaming-cursor" aria-hidden="true" />
+                      )}
+                    </>
                   )}
                 </div>
                 {message.sources && message.sources.length > 0 && (
@@ -467,8 +562,6 @@ export default function Chat() {
               </div>
             ))
           )}
-
-          {isSending && <MessageSkeleton />}
 
           <div ref={messagesEndRef} />
         </div>

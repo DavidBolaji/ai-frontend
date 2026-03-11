@@ -173,7 +173,18 @@ class ApiClient {
 
     if (!response.ok) {
       const payload = await response.json().catch(() => null);
-      throw this.normalizeError(payload, response.status, response.statusText);
+      if (payload) {
+        throw this.normalizeError(payload, response.status, response.statusText);
+      }
+
+      const fallbackText = await response.text().catch(() => '');
+      const fallback: JsonApiErrorItem = {
+        status: String(response.status),
+        code: 'request_failed',
+        title: 'Request Failed',
+        detail: fallbackText || response.statusText || 'Unknown stream error',
+      };
+      throw { errors: [fallback] } as ApiError;
     }
 
     if (response.status === 204) {
@@ -182,6 +193,159 @@ class ApiClient {
 
     const payload = (await response.json()) as JsonApiDocument<T> | T;
     return this.unwrapData<T>(payload);
+  }
+
+  private async streamRequest<T>(
+    endpoint: string,
+    body: unknown,
+    handlers: {
+      onDelta?: (chunk: string) => void;
+      onFinal?: (payload: T) => void;
+      onDone?: () => void;
+    },
+    retry = true
+  ): Promise<T> {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      Accept: 'text/event-stream',
+    };
+
+    if (this.accessToken && !endpoint.includes('/auth/')) {
+      headers['Authorization'] = `Bearer ${this.accessToken}`;
+    }
+
+    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+    });
+
+    if (response.status === 401 && retry && !endpoint.includes('/auth/')) {
+      await this.handleUnauthorized();
+      return this.streamRequest<T>(endpoint, body, handlers, false);
+    }
+
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null);
+      throw this.normalizeError(payload, response.status, response.statusText);
+    }
+
+    if (!response.body) {
+      throw new Error('Stream response body is missing');
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let eventName = 'message';
+    let dataLines: string[] = [];
+    let finalPayload: T | null = null;
+    let streamError: string | null = null;
+
+    // Some backends may emit SSE delimiters as literal "\\n" characters.
+    // Normalize only control boundaries, not JSON content escapes.
+    const normalizeEscapedSseControls = (value: string): string => {
+      return value
+        .replace(/(event:\s*[^\\\n]+?)\\ndata:\s*/g, '$1\ndata: ')
+        .replace(/\\n\\n(?=event:\s*)/g, '\n\n')
+        .replace(/\\n\\n$/g, '\n\n');
+    };
+
+    const flushEvent = () => {
+      if (dataLines.length === 0) {
+        return;
+      }
+
+      const rawData = dataLines.join('\n');
+      dataLines = [];
+
+      if (!rawData) {
+        return;
+      }
+
+      let parsed: any;
+      try {
+        parsed = JSON.parse(rawData);
+      } catch {
+        return;
+      }
+
+      if (eventName === 'delta') {
+        const chunk = typeof parsed?.content === 'string' ? parsed.content : '';
+        if (chunk) {
+          handlers.onDelta?.(chunk);
+        }
+      } else if (eventName === 'final') {
+        finalPayload = parsed as T;
+        handlers.onFinal?.(finalPayload);
+      } else if (eventName === 'error') {
+        const message =
+          (typeof parsed?.detail === 'string' && parsed.detail) ||
+          (typeof parsed?.message === 'string' && parsed.message) ||
+          (typeof parsed?.error === 'string' && parsed.error) ||
+          'Streaming failed';
+        streamError = message;
+      } else if (eventName === 'done') {
+        handlers.onDone?.();
+      }
+    };
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        buffer += decoder.decode();
+        break;
+      }
+
+      buffer += decoder.decode(value, { stream: true });
+      buffer = normalizeEscapedSseControls(buffer);
+
+      while (true) {
+        const newlineIndex = buffer.indexOf('\n');
+        if (newlineIndex === -1) {
+          break;
+        }
+
+        const rawLine = buffer.slice(0, newlineIndex);
+        buffer = buffer.slice(newlineIndex + 1);
+        const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine;
+
+        if (line === '') {
+          flushEvent();
+          eventName = 'message';
+          continue;
+        }
+
+        if (line.startsWith('event:')) {
+          eventName = line.slice(6).trim();
+          continue;
+        }
+
+        if (line.startsWith('data:')) {
+          dataLines.push(line.slice(5).trimStart());
+        }
+      }
+    }
+
+    if (buffer.trim().length > 0) {
+      buffer = normalizeEscapedSseControls(buffer);
+      const trailingLine = buffer.endsWith('\r') ? buffer.slice(0, -1) : buffer;
+      if (trailingLine.startsWith('data:')) {
+        dataLines.push(trailingLine.slice(5).trimStart());
+      }
+    }
+
+    flushEvent();
+
+    if (streamError) {
+      throw new Error(streamError);
+    }
+
+    if (!finalPayload) {
+      throw new Error('Stream completed without final payload');
+    }
+
+    return finalPayload;
   }
 
   // Auth endpoints
@@ -231,6 +395,17 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify(payload),
     });
+  }
+
+  async askStream(
+    payload: AskPayload,
+    handlers: {
+      onDelta?: (chunk: string) => void;
+      onFinal?: (response: AskResponse) => void;
+      onDone?: () => void;
+    } = {}
+  ): Promise<AskResponse> {
+    return this.streamRequest<AskResponse>('/ask/stream', payload, handlers);
   }
 
   async getConversations(skip = 0, limit = 20): Promise<ConversationListResponse> {
