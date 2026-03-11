@@ -62,6 +62,13 @@ export interface AskResponse {
     content: string;
     content_blocks: ContentBlock[];
     rag_used: boolean;
+    rag_sources?: Array<{
+      category?: string;
+      filename?: string;
+      title?: string;
+      similarity?: number;
+      [key: string]: any;
+    }>;
     summary_used: boolean;
     context_messages_used: number;
     prompt_tokens: number;

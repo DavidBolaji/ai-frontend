@@ -270,6 +270,32 @@ export default function Chat() {
     return Array.from(new Set(categories));
   };
 
+  const extractSourcesFromRagSources = (ragSources?: AskResponse['attributes']['rag_sources']): string[] => {
+    if (!ragSources || ragSources.length === 0) {
+      return [];
+    }
+
+    const categories = ragSources
+      .map((source) => {
+        if (source?.category) {
+          return String(source.category);
+        }
+
+        if (source?.filename) {
+          return String(source.filename).replace(/\.[^/.]+$/, '');
+        }
+
+        if (source?.title) {
+          return String(source.title);
+        }
+
+        return undefined;
+      })
+      .filter(Boolean) as string[];
+
+    return Array.from(new Set(categories));
+  };
+
   const handleSendMessage = async (e: FormEvent) => {
     e.preventDefault();
     if (!inputMessage.trim() || isSending) return;
@@ -377,6 +403,10 @@ export default function Chat() {
           const extracted = extractSources(response.attributes.content_blocks);
           if (extracted.length > 0) {
             return extracted;
+          }
+          const extractedFromRagSources = extractSourcesFromRagSources(response.attributes.rag_sources);
+          if (extractedFromRagSources.length > 0) {
+            return extractedFromRagSources;
           }
           if (response.attributes.rag_used) {
             return ['RAG'];
