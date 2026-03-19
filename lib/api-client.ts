@@ -11,6 +11,14 @@ import type {
   JsonApiDocument,
   JsonApiErrorDocument,
   JsonApiErrorItem,
+  OnboardingQuestionsResponse,
+  OnboardingAnswers,
+  OnboardingNextResponse,
+  RoadmapOverview,
+  CategoryDetailResponse,
+  AnswerStepResponse,
+  StepChatResponse,
+  StepChatHistoryResponse,
 } from './types';
 
 const API_BASE_URL = '/api/proxy';
@@ -92,6 +100,19 @@ class ApiClient {
       const jsonApiError = payload as JsonApiErrorDocument;
       if (Array.isArray(jsonApiError.errors) && jsonApiError.errors.length > 0) {
         return { errors: jsonApiError.errors };
+      }
+
+      // Handle validation-style responses: { type: "...", attributes: { error: "..." } }
+      const validationResp = payload as { type?: string; attributes?: { error?: string; suggestion?: string } };
+      if (validationResp.attributes?.error) {
+        return {
+          errors: [{
+            status: String(status),
+            code: 'validation_error',
+            title: 'Validation Error',
+            detail: validationResp.attributes.error,
+          }],
+        };
       }
     }
 
@@ -202,6 +223,7 @@ class ApiClient {
       onDelta?: (chunk: string) => void;
       onFinal?: (payload: T) => void;
       onDone?: () => void;
+      onProgress?: (pct: number, message: string) => void;
     },
     retry = true
   ): Promise<T> {
@@ -278,6 +300,10 @@ class ApiClient {
       } else if (eventName === 'final') {
         finalPayload = parsed as T;
         handlers.onFinal?.(finalPayload);
+      } else if (eventName === 'progress') {
+        const pct = typeof parsed?.pct === 'number' ? parsed.pct : 0;
+        const message = typeof parsed?.message === 'string' ? parsed.message : '';
+        handlers.onProgress?.(pct, message);
       } else if (eventName === 'error') {
         const message =
           (typeof parsed?.detail === 'string' && parsed.detail) ||
@@ -422,6 +448,83 @@ class ApiClient {
     return this.request<MessageListResponse>(
       `/conversations/${conversationId}/messages?skip=${skip}&limit=${limit}`
     );
+  }
+
+  // Roadmap endpoints
+  async getRoadmap(): Promise<RoadmapOverview> {
+    return this.request<RoadmapOverview>('/roadmap');
+  }
+
+  async getOnboardingQuestions(): Promise<OnboardingQuestionsResponse> {
+    return this.request<OnboardingQuestionsResponse>('/roadmap/onboarding/questions');
+  }
+
+  async submitOnboarding(answers: OnboardingAnswers): Promise<RoadmapOverview> {
+    return this.request<RoadmapOverview>('/roadmap/onboarding', {
+      method: 'POST',
+      body: JSON.stringify({ answers }),
+    });
+  }
+
+  async getNextOnboardingQuestion(answers: Record<string, string>): Promise<OnboardingNextResponse> {
+    const encoded = encodeURIComponent(JSON.stringify(answers));
+    return this.request<OnboardingNextResponse>(`/roadmap/onboarding/next?answers=${encoded}`);
+  }
+
+  async answerOnboardingQuestion(
+    questionKey: string,
+    answer: string,
+    answers: Record<string, string>,
+  ): Promise<OnboardingNextResponse> {
+    const encoded = encodeURIComponent(JSON.stringify(answers));
+    return this.request<OnboardingNextResponse>(`/roadmap/onboarding/answer?answers=${encoded}`, {
+      method: 'POST',
+      body: JSON.stringify({ question_key: questionKey, answer }),
+    });
+  }
+
+  async completeOnboarding(answers: Record<string, string>): Promise<RoadmapOverview> {
+    return this.request<RoadmapOverview>('/roadmap/onboarding/complete', {
+      method: 'POST',
+      body: JSON.stringify({ answers }),
+    });
+  }
+
+  async completeOnboardingStream(
+    answers: Record<string, string>,
+    handlers: {
+      onProgress?: (pct: number, message: string) => void;
+      onFinal?: (roadmap: RoadmapOverview) => void;
+      onDone?: () => void;
+    } = {}
+  ): Promise<RoadmapOverview> {
+    return this.streamRequest<RoadmapOverview>(
+      '/roadmap/onboarding/complete/stream',
+      { answers },
+      handlers,
+    );
+  }
+
+  async getCategoryDetail(categoryId: string): Promise<CategoryDetailResponse> {
+    return this.request<CategoryDetailResponse>(`/roadmap/categories/${categoryId}`);
+  }
+
+  async answerStep(stepId: string, answer: string, answerData?: Record<string, any>): Promise<AnswerStepResponse> {
+    return this.request<AnswerStepResponse>(`/roadmap/steps/${stepId}/answer`, {
+      method: 'POST',
+      body: JSON.stringify({ answer, answer_data: answerData ?? null }),
+    });
+  }
+
+  async stepChat(stepId: string, message: string): Promise<StepChatResponse> {
+    return this.request<StepChatResponse>(`/roadmap/steps/${stepId}/chat`, {
+      method: 'POST',
+      body: JSON.stringify({ message }),
+    });
+  }
+
+  async getStepChatHistory(stepId: string): Promise<StepChatHistoryResponse> {
+    return this.request<StepChatHistoryResponse>(`/roadmap/steps/${stepId}/chat`);
   }
 }
 

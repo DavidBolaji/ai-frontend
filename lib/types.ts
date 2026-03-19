@@ -167,3 +167,161 @@ export interface JsonApiErrorDocument {
   jsonapi?: JsonApiMeta;
   errors: JsonApiErrorItem[];
 }
+
+// --- Roadmap types ---
+
+export interface StepOption {
+  value: string;
+  label: string;
+}
+
+export interface OnboardingQuestion {
+  key: string;
+  question: string;
+  type: 'open' | 'single_choice' | 'multi_choice' | 'yes_no' | 'info';
+  options?: StepOption[];
+  metadata?: Record<string, any> | null;
+  content_blocks?: ContentBlock[];
+}
+
+export interface OnboardingQuestionsResponse {
+  type: 'onboarding-questions';
+  id: string;
+  attributes: {
+    questions: OnboardingQuestion[];
+  };
+}
+
+export interface OnboardingProgress {
+  answered: Record<string, string>;
+  current_index: number;
+  total_questions: number;
+  is_complete: boolean;
+}
+
+export interface OnboardingNextResponse {
+  type: 'onboarding-next';
+  id: string;
+  attributes: {
+    question: OnboardingQuestion | null;
+    progress: OnboardingProgress;
+  };
+}
+
+export interface OnboardingValidationError {
+  type: 'onboarding-validation-error';
+  id: string;
+  attributes: {
+    error: string;
+    suggestion?: string;
+  };
+}
+
+export interface OnboardingAnswers {
+  arrival_status: string;
+  municipality?: string | null;
+  has_bsn?: boolean;
+  employment_status?: string | null;
+  housing_status?: string | null;
+  language_level?: string | null;
+  children?: boolean | null;
+  additional_info?: string | null;
+  [key: string]: any;
+}
+
+export interface OnboardingAnswerPayload {
+  question_key: string;
+  answer: string;
+}
+
+export interface RoadmapCategoryOverview {
+  id: string;
+  category: string;
+  sequence_no: number;
+  status: string;
+  progress_pct: number;
+  prerequisites_met: boolean;
+  total_steps: number;
+  completed_steps: number;
+}
+
+export interface RoadmapOverview {
+  type: 'roadmap-overview';
+  id: string;
+  attributes: {
+    id: string;
+    status: string;
+    categories: RoadmapCategoryOverview[];
+    overall_progress_pct: number;
+  };
+}
+
+export interface RoadmapStepDetail {
+  id: string;
+  step_number: number;
+  question_key: string;
+  question_text: string;
+  question_type: 'open' | 'single_choice' | 'multi_choice' | 'yes_no' | 'info';
+  options: StepOption[] | null;
+  answer: string | null;
+  answer_data: Record<string, any> | null;
+  status: string;
+  is_ai_generated: boolean;
+  has_conversation: boolean;
+  content_blocks: ContentBlock[];
+  metadata_: Record<string, any> | null;
+}
+
+export interface CategoryDetailResponse {
+  type: 'roadmap-category';
+  id: string;
+  attributes: {
+    category: RoadmapCategoryOverview;
+    steps: RoadmapStepDetail[];
+  };
+}
+
+export interface AnswerStepResponse {
+  type: 'roadmap-step-answer';
+  id: string;
+  attributes: {
+    completed_step: RoadmapStepDetail;
+    next_step: RoadmapStepDetail | null;
+    new_steps_added: RoadmapStepDetail[];
+    reset_steps?: RoadmapStepDetail[];
+    deleted_step_ids?: string[];
+    category_progress_pct: number;
+    category_completed: boolean;
+    routed_to_chat?: boolean;
+    chat_response?: {
+      conversation_id: string;
+      content: string;
+      content_blocks: ContentBlock[];
+    };
+    validation_error?: string;
+  };
+}
+
+export interface StepChatResponse {
+  type: 'roadmap-step-chat';
+  id: string;
+  attributes: {
+    conversation_id: string;
+    content: string;
+    content_blocks: ContentBlock[];
+  };
+}
+
+export interface StepChatHistoryResponse {
+  type: 'roadmap-step-chat-history';
+  id: string;
+  attributes: {
+    messages: Array<{
+      id: string;
+      role: 'user' | 'assistant';
+      content: string;
+      sequence_no: number;
+      created_at: string;
+    }>;
+  };
+}

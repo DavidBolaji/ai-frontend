@@ -7,7 +7,8 @@ import type {
   Conversation, 
   Message, 
   ContentBlock,
-  AskResponse 
+  AskResponse,
+  OnboardingQuestion,
 } from '@/lib/types';
 
 type Mode = 'ask' | 'roadmap';
@@ -19,11 +20,20 @@ interface DisplayMessage {
   content_blocks?: ContentBlock[];
   sources?: string[];
   isStreaming?: boolean;
+  isThinking?: boolean;
 }
 
 const SOURCE_TAG_CACHE_KEY = 'sourceTagCacheByConversation';
 
 type SourceTagCache = Record<string, Record<string, string[]>>;
+
+const ONBOARDING_REPLY_DELAY_MIN = 300;
+const ONBOARDING_REPLY_DELAY_MAX = 800;
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const randomDelay = () =>
+  Math.floor(Math.random() * (ONBOARDING_REPLY_DELAY_MAX - ONBOARDING_REPLY_DELAY_MIN + 1)) + ONBOARDING_REPLY_DELAY_MIN;
 
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message) {
@@ -112,6 +122,17 @@ export default function Chat() {
   // Input
   const [inputMessage, setInputMessage] = useState('');
   const [isSending, setIsSending] = useState(false);
+
+  // Roadmap onboarding state
+  const [onboardingQuestion, setOnboardingQuestion] = useState<OnboardingQuestion | null>(null);
+  const [onboardingAnswers, setOnboardingAnswers] = useState<Record<string, string>>({});
+  const onboardingAnswersRef = useRef<Record<string, string>>({});
+  const [onboardingActive, setOnboardingActive] = useState(false);
+  const [onboardingSubmitting, setOnboardingSubmitting] = useState(false);
+  const [onboardingProgress, setOnboardingProgress] = useState<{ current: number; total: number }>({ current: 0, total: 0 });
+  const [roadmapCreating, setRoadmapCreating] = useState(false);
+  const [roadmapProgress, setRoadmapProgress] = useState<number>(0);
+  const [roadmapProgressMessage, setRoadmapProgressMessage] = useState<string>('Preparing your roadmap...');
 
   // Initialize
   useEffect(() => {
@@ -300,6 +321,16 @@ export default function Chat() {
     e.preventDefault();
     if (!inputMessage.trim() || isSending) return;
 
+    // If onboarding is active and current question is open type, handle as onboarding answer
+    if (onboardingActive && onboardingQuestion) {
+      if (onboardingQuestion.type === 'open') {
+        const answer = inputMessage.trim();
+        setInputMessage('');
+        handleOnboardingAnswer(answer);
+        return;
+      }
+    }
+
     const userMessage = inputMessage.trim();
     setInputMessage('');
     setIsSending(true);
@@ -312,79 +343,17 @@ export default function Chat() {
     };
     setMessages(prev => [...prev, tempUserMsg]);
 
-    const streamingAssistantId = `stream-${Date.now()}`;
+    const thinkingId = `thinking-${Date.now()}`;
     setMessages(prev => [
       ...prev,
-      {
-        id: streamingAssistantId,
-        role: 'assistant',
-        content: '',
-        isStreaming: true,
-      },
+      { id: thinkingId, role: 'assistant', content: '', isThinking: true },
     ]);
 
-    const streamChunkQueue: string[] = [];
-    let streamFlushTimer: ReturnType<typeof setInterval> | null = null;
-    let streamDrainResolver: (() => void) | null = null;
-
-    const resolveDrainIfIdle = () => {
-      if (streamChunkQueue.length === 0 && !streamFlushTimer && streamDrainResolver) {
-        const resolve = streamDrainResolver;
-        streamDrainResolver = null;
-        resolve();
-      }
-    };
-
-    const stopStreamFlush = () => {
-      if (streamFlushTimer) {
-        clearInterval(streamFlushTimer);
-        streamFlushTimer = null;
-      }
-      resolveDrainIfIdle();
-    };
-
-    const startStreamFlush = () => {
-      if (streamFlushTimer) {
-        return;
-      }
-
-      streamFlushTimer = setInterval(() => {
-        const nextChunk = streamChunkQueue.shift();
-        if (!nextChunk) {
-          stopStreamFlush();
-          return;
-        }
-
-        setMessages(prev => prev.map((msg) => (
-          msg.id === streamingAssistantId
-            ? { ...msg, content: `${msg.content}${nextChunk}` }
-            : msg
-        )));
-      }, 70);
-    };
-
-    const waitForStreamDrain = async () => {
-      if (streamChunkQueue.length === 0 && !streamFlushTimer) {
-        return;
-      }
-
-      await new Promise<void>((resolve) => {
-        streamDrainResolver = resolve;
-      });
-    };
-
     try {
-      const response: AskResponse = await apiClient.askStream({
+      const response: AskResponse = await apiClient.ask({
         message: userMessage,
         conversation_id: currentConversationId || undefined,
-      }, {
-        onDelta: (chunk: string) => {
-          streamChunkQueue.push(chunk);
-          startStreamFlush();
-        },
       });
-
-      await waitForStreamDrain();
 
       // Update conversation ID if new
       if (!currentConversationId) {
@@ -420,19 +389,13 @@ export default function Chat() {
         persistSourceTags(targetConversationId, assistantMsg.id, assistantMsg.sources);
       }
 
-      setMessages(prev => prev.map((msg) => (
-        msg.id === streamingAssistantId
-          ? assistantMsg
-          : msg
-      )));
+      setMessages(prev => prev.map(m => m.id === thinkingId ? assistantMsg : m));
     } catch (error) {
-      stopStreamFlush();
       console.error('Failed to send message:', error);
       // Remove optimistic messages on error
-      setMessages(prev => prev.filter(m => m.id !== tempUserMsg.id && m.id !== streamingAssistantId));
+      setMessages(prev => prev.filter(m => m.id !== tempUserMsg.id && m.id !== thinkingId));
       alert(getErrorMessage(error));
     } finally {
-      stopStreamFlush();
       setIsSending(false);
     }
   };
@@ -448,6 +411,185 @@ export default function Chat() {
     setCurrentConversationId(null);
     setMessages([]);
     loadWelcomeMessage();
+  };
+
+  const handleModeChange = async (newMode: Mode) => {
+    setMode(newMode);
+    if (newMode === 'roadmap') {
+      // Check if user already has a roadmap
+      try {
+        await apiClient.getRoadmap();
+        // Roadmap exists → go straight to roadmap page
+        router.push('/roadmap');
+        return;
+      } catch {
+        // No roadmap yet → start conversational onboarding
+      }
+
+      setOnboardingActive(true);
+      setOnboardingAnswers({});
+      onboardingAnswersRef.current = {};
+      setOnboardingQuestion(null);
+      setRoadmapCreating(false);
+      setMessages([]);
+
+      try {
+        const resp = await apiClient.getNextOnboardingQuestion({});
+        const q = resp.attributes.question;
+        const progress = resp.attributes.progress;
+
+        setOnboardingProgress({ current: progress.current_index + 1, total: progress.total_questions });
+
+        if (q) {
+          setOnboardingQuestion(q);
+          setMessages([
+            {
+              id: `onboarding-q-${progress.current_index}`,
+              role: 'assistant',
+              content: q.question,
+              content_blocks: q.content_blocks || [{ type: 'text', content: q.question }],
+            },
+          ]);
+        }
+      } catch (error) {
+        console.error('Failed to load onboarding:', error);
+        setMessages([{
+          id: 'onboarding-error',
+          role: 'assistant',
+          content: 'Failed to load onboarding questions. Please try again.',
+          content_blocks: [{ type: 'text', content: 'Failed to load onboarding questions. Please try again.' }],
+        }]);
+        setOnboardingActive(false);
+      }
+    } else {
+      // Switch back to ask mode
+      setOnboardingActive(false);
+      setOnboardingQuestion(null);
+      setOnboardingAnswers({});
+      onboardingAnswersRef.current = {};
+      setOnboardingProgress({ current: 0, total: 0 });
+      setRoadmapCreating(false);
+      setMessages([]);
+      loadWelcomeMessage();
+    }
+  };
+
+  const finishOnboarding = async (answers: Record<string, string>) => {
+    setRoadmapCreating(true);
+    setRoadmapProgress(0);
+    setRoadmapProgressMessage('Preparing your roadmap...');
+    setOnboardingQuestion(null);
+
+    try {
+      await apiClient.completeOnboardingStream(answers, {
+        onProgress: (pct, message) => {
+          setRoadmapProgress(pct);
+          setRoadmapProgressMessage(message);
+        },
+      });
+
+      // Keep showing the progress card and redirect immediately after completion.
+      setRoadmapProgress(100);
+      setRoadmapProgressMessage('Your roadmap is ready!');
+      setTimeout(() => {
+        router.push('/roadmap');
+      }, 250);
+    } catch (error) {
+      console.error('Failed to create roadmap:', error);
+      setRoadmapCreating(false);
+      setMessages(prev => [...prev, {
+        id: 'onboarding-error',
+        role: 'assistant',
+        content: 'Failed to create your roadmap. Please try again.',
+        content_blocks: [{ type: 'text', content: 'Failed to create your roadmap. Please try again.' }],
+      }]);
+    }
+  };
+
+  const handleOnboardingAnswer = async (answer: string) => {
+    if (!onboardingQuestion || onboardingSubmitting) return;
+
+    const currentQ = onboardingQuestion;
+    const questionKey = currentQ.key;
+
+    // Add user answer to messages
+    setMessages(prev => [...prev, {
+      id: `onboarding-a-${questionKey}`,
+      role: 'user',
+      content: answer,
+    }]);
+
+    setOnboardingSubmitting(true);
+
+    try {
+      // Use ref (always fresh) instead of stale closure state
+      const currentAnswers = onboardingAnswersRef.current;
+
+      const resp = await apiClient.answerOnboardingQuestion(
+        questionKey,
+        answer,
+        currentAnswers,
+      );
+
+      const { question: nextQ, progress } = resp.attributes;
+
+      // Merge answer into local state AND ref
+      const updatedAnswers = { ...currentAnswers, [questionKey]: answer };
+      setOnboardingAnswers(updatedAnswers);
+      onboardingAnswersRef.current = updatedAnswers;
+      setOnboardingProgress({ current: progress.current_index + 1, total: progress.total_questions });
+
+      // Add a short variable pause so onboarding feels conversational, not robotic.
+      await sleep(randomDelay());
+
+      if (progress.is_complete) {
+        await finishOnboarding(updatedAnswers);
+      } else if (nextQ) {
+        setOnboardingQuestion(nextQ);
+
+        // Handle 'info' type questions — show progress card and complete roadmap
+        if (nextQ.type === 'info') {
+          // Include the info answer directly, skip the round-trip
+          const finalAnswers = { ...updatedAnswers, [nextQ.key]: 'acknowledged' };
+          setOnboardingAnswers(finalAnswers);
+          onboardingAnswersRef.current = finalAnswers;
+          await finishOnboarding(finalAnswers);
+        } else {
+          setMessages(prev => [...prev, {
+            id: `onboarding-q-${nextQ.key}`,
+            role: 'assistant',
+            content: nextQ.question,
+            content_blocks: nextQ.content_blocks || [{ type: 'text', content: nextQ.question }],
+          }]);
+        }
+      }
+    } catch (error: any) {
+      // Handle validation errors from the backend
+      // Backend may return { errors: [{ detail }] } (normalized) or 
+      // { type: "onboarding-validation-error", attributes: { error } } (raw 422)
+      const validationError =
+        error?.errors?.[0]?.detail ||
+        error?.attributes?.error ||
+        (error?.type === 'onboarding-validation-error' && error?.attributes?.error);
+      if (validationError && validationError !== 'Unprocessable Entity') {
+        setMessages(prev => [...prev, {
+          id: `onboarding-validation-${Date.now()}`,
+          role: 'assistant',
+          content: validationError,
+          content_blocks: [{ type: 'text', content: validationError }],
+        }]);
+      } else {
+        console.error('Failed during onboarding:', error);
+        setMessages(prev => [...prev, {
+          id: `onboarding-error-${Date.now()}`,
+          role: 'assistant',
+          content: 'Something went wrong. Please try again.',
+          content_blocks: [{ type: 'text', content: 'Something went wrong. Please try again.' }],
+        }]);
+      }
+    } finally {
+      setOnboardingSubmitting(false);
+    }
   };
 
   if (!user) {
@@ -500,13 +642,13 @@ export default function Chat() {
           <div className="mode-toggle">
             <button
               className={`mode-button ${mode === 'ask' ? 'active' : ''}`}
-              onClick={() => setMode('ask')}
+              onClick={() => handleModeChange('ask')}
             >
               Ask
             </button>
             <button
               className={`mode-button ${mode === 'roadmap' ? 'active' : ''}`}
-              disabled
+              onClick={() => handleModeChange('roadmap')}
             >
               Roadmap
             </button>
@@ -569,7 +711,11 @@ export default function Chat() {
             messages.map((message) => (
               <div key={message.id} className={`message ${message.role}`}>
                 <div className="message-content">
-                  {message.content_blocks ? (
+                  {message.isThinking ? (
+                    <span className="thinking-dots" aria-label="Thinking">
+                      <span /><span /><span />
+                    </span>
+                  ) : message.content_blocks ? (
                     <ContentBlockRenderer blocks={message.content_blocks} />
                   ) : (
                     <>
@@ -593,6 +739,52 @@ export default function Chat() {
             ))
           )}
 
+          {/* Roadmap creation progress card */}
+          {roadmapCreating && (
+            <div className="roadmap-creating-card">
+
+              <div className="roadmap-creating-subtitle">{roadmapProgressMessage}</div>
+              <div className="roadmap-creating-bar-container">
+                <div
+                  className="roadmap-creating-bar"
+                  style={{ width: `${roadmapProgress}%` }}
+                />
+              </div>
+              <div className="roadmap-creating-pct">{roadmapProgress}%</div>
+            </div>
+          )}
+
+          {/* Onboarding option buttons — directly under the question */}
+          {onboardingActive && !roadmapCreating && onboardingQuestion && (() => {
+            if (onboardingQuestion.type === 'yes_no') {
+              return (
+                <div className="onboarding-options">
+                  <button className="onboarding-option-btn" onClick={() => handleOnboardingAnswer('yes')} disabled={onboardingSubmitting}>Yes</button>
+                  <button className="onboarding-option-btn" onClick={() => handleOnboardingAnswer('no')} disabled={onboardingSubmitting}>No</button>
+                </div>
+              );
+            }
+            if ((onboardingQuestion.type === 'single_choice' || onboardingQuestion.type === 'multi_choice') && onboardingQuestion.options) {
+              return (
+                <div className="onboarding-options">
+                  {onboardingQuestion.options.map((opt) => (
+                    <button key={opt.value} className="onboarding-option-btn" onClick={() => handleOnboardingAnswer(opt.value)} disabled={onboardingSubmitting}>
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              );
+            }
+            return null;
+          })()}
+
+          {/* Onboarding progress indicator */}
+          {onboardingActive && !roadmapCreating && onboardingProgress.total > 0 && (
+            <div className="onboarding-progress">
+              <span>Question {onboardingProgress.current} of {onboardingProgress.total}</span>
+            </div>
+          )}
+
           <div ref={messagesEndRef} />
         </div>
 
@@ -601,7 +793,9 @@ export default function Chat() {
           <form onSubmit={handleSendMessage} className="chat-input-wrapper">
             <textarea
               className="chat-input"
-              placeholder="Type your message..."
+              placeholder={onboardingActive && onboardingQuestion?.metadata?.hint
+                ? onboardingQuestion.metadata.hint
+                : onboardingActive ? 'Type your answer...' : 'Type your message...'}
               value={inputMessage}
               onChange={(e) => setInputMessage(e.target.value)}
               onKeyDown={(e) => {
@@ -611,14 +805,14 @@ export default function Chat() {
                 }
               }}
               rows={1}
-              disabled={isSending}
+              disabled={isSending || onboardingSubmitting}
             />
             <button 
               type="submit" 
               className="btn-send"
-              disabled={isSending || !inputMessage.trim()}
+              disabled={isSending || onboardingSubmitting || !inputMessage.trim()}
             >
-              {isSending ? 'Sending...' : 'Send'}
+              {isSending || onboardingSubmitting ? 'Sending...' : 'Send'}
             </button>
           </form>
         </div>

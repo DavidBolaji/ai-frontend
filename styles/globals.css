@@ -384,6 +384,8 @@ textarea {
   padding: 1rem 1.25rem;
   border-radius: 12px;
   line-height: 1.6;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 
 .message.user .message-content {
@@ -396,6 +398,35 @@ textarea {
   background: #f3f4f6;
   color: #1a1a1a;
   border-bottom-left-radius: 4px;
+}
+
+.thinking-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 0;
+}
+
+.thinking-dots span {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #9ca3af;
+  animation: thinkingBounce 1.2s ease-in-out infinite;
+}
+
+.thinking-dots span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.thinking-dots span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes thinkingBounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30% { transform: translateY(-5px); opacity: 1; }
 }
 
 .streaming-cursor {
@@ -539,6 +570,10 @@ textarea {
 .content-link {
   color: #1f2937;
   text-decoration: underline;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  display: inline-block;
+  max-width: 100%;
 }
 
 .chat-sidebar.collapsed .chat-user-info,
@@ -613,6 +648,52 @@ textarea {
   border-radius: 8px;
 }
 
+/* Typing indicator */
+.typing-indicator {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.25rem;
+  background: #f3f4f6;
+  border-radius: 12px;
+  border-bottom-left-radius: 4px;
+  width: fit-content;
+  color: #6b7280;
+  font-size: 0.9rem;
+}
+
+.typing-dots {
+  display: flex;
+  gap: 4px;
+}
+
+.typing-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #9ca3af;
+  animation: typingBounce 1.4s ease-in-out infinite;
+}
+
+.typing-dots span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.typing-dots span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes typingBounce {
+  0%, 60%, 100% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+  30% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}
+
 /* Scrollbar */
 .conversations-list::-webkit-scrollbar,
 .messages-container::-webkit-scrollbar {
@@ -682,4 +763,380 @@ textarea {
   .message {
     max-width: 85%;
   }
+
+  .step-nav-header {
+    padding: 0.5rem 0.75rem;
+  }
+
+  .step-nav-counter {
+    font-size: 0.85rem;
+  }
+
+  .step-nav-category {
+    display: none;
+  }
+}
+
+/* ========== Onboarding option buttons ========== */
+
+.onboarding-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  align-self: flex-start;
+  max-width: 70%;
+}
+
+.onboarding-option-btn {
+  padding: 0.6rem 1.25rem;
+  background: #f3f4f6;
+  border: 1.5px solid #d1d5db;
+  border-radius: 20px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #374151;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.onboarding-option-btn:hover:not(:disabled) {
+  background: #1f2937;
+  color: #ffffff;
+  border-color: #1f2937;
+}
+
+.onboarding-option-btn.selected {
+  background: #1f2937;
+  color: #ffffff;
+  border-color: #1f2937;
+  box-shadow: 0 0 0 2px rgba(31, 41, 55, 0.3);
+}
+
+.onboarding-option-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.onboarding-progress {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  font-size: 0.8rem;
+  color: #6b7280;
+  align-self: flex-start;
+}
+
+/* ========== Roadmap Creating Progress Card ========== */
+
+.roadmap-creating-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 2rem 1.5rem;
+  margin: 1rem 0 1rem auto;
+  max-width: 400px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 16px;
+  text-align: left;
+  height: 300px;
+}
+
+.roadmap-creating-icon {
+  font-size: 2.5rem;
+}
+
+.roadmap-creating-title {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #111827;
+}
+
+.roadmap-creating-subtitle {
+  font-size: 0.85rem;
+  color: #6b7280;
+  line-height: 1.4;
+}
+
+.roadmap-creating-bar-container {
+  width: 100%;
+  height: 6px;
+  background: #e5e7eb;
+  border-radius: 3px;
+  overflow: hidden;
+  margin-top: 0.5rem;
+}
+
+.roadmap-creating-bar {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #6366f1, #8b5cf6);
+  border-radius: 3px;
+  transition: width 0.8s ease-in-out;
+}
+
+.roadmap-creating-pct {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #6366f1;
+  margin-top: -0.25rem;
+  align-self: flex-end;
+}
+
+/* ========== Roadmap Category Sidebar ========== */
+
+.roadmap-progress-header {
+  margin-top: 0.75rem;
+}
+
+.roadmap-progress-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 0.35rem;
+}
+
+.roadmap-progress-bar-container {
+  width: 100%;
+  height: 6px;
+  background: #e5e7eb;
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 0.25rem;
+}
+
+.roadmap-progress-bar {
+  height: 100%;
+  background: #10b981;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+
+.roadmap-progress-pct {
+  font-size: 0.75rem;
+  color: #6b7280;
+  text-align: right;
+}
+
+.roadmap-category-item {
+  padding: 0.75rem 1rem !important;
+}
+
+.roadmap-category-item.locked {
+  opacity: 0.5;
+  cursor: not-allowed !important;
+}
+
+.roadmap-category-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.roadmap-category-icon {
+  font-size: 1.25rem;
+  flex-shrink: 0;
+}
+
+.roadmap-category-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.roadmap-category-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.15rem;
+}
+
+.roadmap-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.roadmap-category-status {
+  font-size: 0.75rem;
+  color: #6b7280;
+}
+
+.roadmap-category-progress-mini {
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+}
+
+.roadmap-ring {
+  width: 100%;
+  height: 100%;
+}
+
+.roadmap-ring-bg {
+  fill: none;
+  stroke: #e5e7eb;
+  stroke-width: 3.8;
+}
+
+.roadmap-ring-fill {
+  fill: none;
+  stroke-width: 3.8;
+  stroke-linecap: round;
+  transform: rotate(-90deg);
+  transform-origin: 50% 50%;
+  transition: stroke-dasharray 0.4s ease;
+}
+
+/* ========== Step Navigation ========== */
+
+.step-nav-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 2rem;
+  border-bottom: 1px solid #e5e7eb;
+  background: #fafafa;
+}
+
+.step-nav-btn {
+  padding: 0.45rem 1rem;
+  background: #f3f4f6;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: #374151;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.step-nav-btn:hover:not(:disabled) {
+  background: #e5e7eb;
+}
+
+.step-nav-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.step-nav-info {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+}
+
+.step-nav-counter {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.step-nav-category {
+  font-size: 0.8rem;
+  color: #6b7280;
+}
+
+/* ========== Step Content ========== */
+
+.step-question-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.step-status-badge {
+  font-size: 0.85rem;
+}
+
+.step-status-badge.completed {
+  color: #10b981;
+}
+
+.step-status-badge.active {
+  color: #f59e0b;
+}
+
+.step-status-badge.pending {
+  color: #9ca3af;
+}
+
+.step-question-type {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #9ca3af;
+  background: #f3f4f6;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+}
+
+.step-title {
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: #1a1a1a;
+  margin: 0 0 0.25rem 0;
+}
+
+.step-content-text {
+  font-size: 1rem;
+  line-height: 1.6;
+  color: #374151;
+}
+
+.step-question-text {
+  font-size: 1.05rem;
+  line-height: 1.5;
+  color: #1a1a1a;
+}
+
+.step-help-text {
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+  color: #6b7280;
+  font-style: italic;
+}
+
+.step-options-inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  align-self: flex-start;
+  max-width: 70%;
+  animation: fadeIn 0.3s ease;
+}
+
+.step-open-answer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.75rem 1rem;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 12px;
+  margin-bottom: 1rem;
+  align-self: flex-start;
+  max-width: 70%;
+}
+
+.step-open-answer-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #16a34a;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.step-open-answer-text {
+  font-size: 0.9rem;
+  color: #374151;
 }
