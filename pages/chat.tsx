@@ -35,6 +35,21 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const randomDelay = () =>
   Math.floor(Math.random() * (ONBOARDING_REPLY_DELAY_MAX - ONBOARDING_REPLY_DELAY_MIN + 1)) + ONBOARDING_REPLY_DELAY_MIN;
 
+function PaperPlaneIcon() {
+  return (
+    <svg
+      viewBox="0 0 512 512"
+      width="15"
+      height="15"
+      fill="currentColor"
+      aria-hidden="true"
+      style={{ transform: 'rotate(45deg)', display: 'block', flexShrink: 0 }}
+    >
+      <path d="M498.1 5.6c10.1 7 15.4 19.1 13.5 31.2l-64 416c-1.5 9.7-7.4 18.2-16 23s-18.9 5.4-28 1.6L284 427.7l-68.5 74.1c-8.9 9.7-22.9 12.9-35.2 8.1S160 493.2 160 480V396.4c0-4 1.5-7.9 4.2-10.8L331.8 202.8c5.8-6.3 5.6-16-.4-22s-15.7-6.4-22-.7L106 360.8 17.7 316.6C7.1 311.3 .3 300.7 0 288.9s5.9-22.8 16.1-28.7l448-256c10.7-6.1 23.9-5.5 34 1.4z"/>
+    </svg>
+  );
+}
+
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message) {
     return error.message;
@@ -122,6 +137,8 @@ export default function Chat() {
   // Input
   const [inputMessage, setInputMessage] = useState('');
   const [isSending, setIsSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const chatFormRef = useRef<HTMLFormElement>(null);
 
   // Roadmap onboarding state
   const [onboardingQuestion, setOnboardingQuestion] = useState<OnboardingQuestion | null>(null);
@@ -333,6 +350,7 @@ export default function Chat() {
 
     const userMessage = inputMessage.trim();
     setInputMessage('');
+    setSendError(null);
     setIsSending(true);
 
     // Add user message immediately
@@ -394,7 +412,8 @@ export default function Chat() {
       console.error('Failed to send message:', error);
       // Remove optimistic messages on error
       setMessages(prev => prev.filter(m => m.id !== tempUserMsg.id && m.id !== thinkingId));
-      alert(getErrorMessage(error));
+      setInputMessage(userMessage);
+      setSendError(getErrorMessage(error));
     } finally {
       setIsSending(false);
     }
@@ -638,21 +657,6 @@ export default function Chat() {
               Logout
             </button>
           </div>
-
-          <div className="mode-toggle">
-            <button
-              className={`mode-button ${mode === 'ask' ? 'active' : ''}`}
-              onClick={() => handleModeChange('ask')}
-            >
-              Ask
-            </button>
-            <button
-              className={`mode-button ${mode === 'roadmap' ? 'active' : ''}`}
-              onClick={() => handleModeChange('roadmap')}
-            >
-              Roadmap
-            </button>
-          </div>
         </div>
 
         <div 
@@ -790,14 +794,41 @@ export default function Chat() {
 
         {/* Input */}
         <div className="chat-input-container">
-          <form onSubmit={handleSendMessage} className="chat-input-wrapper">
+          {/* Mode toggle above input */}
+          <div className="input-mode-toggle">
+            <button
+              className={`mode-button ${mode === 'ask' ? 'active' : ''}`}
+              onClick={() => handleModeChange('ask')}
+            >
+              Ask
+            </button>
+            <button
+              className={`mode-button ${mode === 'roadmap' ? 'active' : ''}`}
+              onClick={() => handleModeChange('roadmap')}
+            >
+              Roadmap
+            </button>
+          </div>
+          {sendError && (
+            <div className="submit-error-banner">
+              <span>{sendError}</span>
+              <button
+                type="button"
+                className="submit-error-retry"
+                onClick={() => { setSendError(null); chatFormRef.current?.requestSubmit(); }}
+              >
+                Try again
+              </button>
+            </div>
+          )}
+          <form ref={chatFormRef} onSubmit={handleSendMessage} className="chat-input-wrapper">
             <textarea
               className="chat-input"
               placeholder={onboardingActive && onboardingQuestion?.metadata?.hint
                 ? onboardingQuestion.metadata.hint
-                : onboardingActive ? 'Type your answer...' : 'Type your message...'}
+                : onboardingActive ? 'Choose above...' : 'Type a message...'}
               value={inputMessage}
-              onChange={(e) => setInputMessage(e.target.value)}
+              onChange={(e) => { setSendError(null); setInputMessage(e.target.value); }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
@@ -805,14 +836,16 @@ export default function Chat() {
                 }
               }}
               rows={1}
-              disabled={isSending || onboardingSubmitting}
+              disabled={isSending || onboardingSubmitting || (onboardingActive && onboardingQuestion?.type !== 'open')}
+              readOnly={onboardingActive && onboardingQuestion?.type !== 'open'}
             />
             <button 
               type="submit" 
               className="btn-send"
-              disabled={isSending || onboardingSubmitting || !inputMessage.trim()}
+              disabled={isSending || onboardingSubmitting || !inputMessage.trim() || (onboardingActive && onboardingQuestion?.type !== 'open')}
             >
-              {isSending || onboardingSubmitting ? 'Sending...' : 'Send'}
+              <span className="btn-send-icon"><PaperPlaneIcon /></span>
+              <span className="btn-send-label">{isSending || onboardingSubmitting ? 'Sending...' : 'Send'}</span>
             </button>
           </form>
         </div>

@@ -361,6 +361,10 @@ textarea {
   animation: fadeIn 0.3s ease;
 }
 
+.message.assistant {
+  max-width: 100%;
+}
+
 @keyframes fadeIn {
   from {
     opacity: 0;
@@ -474,11 +478,69 @@ textarea {
   border-top: 1px solid #e5e7eb;
 }
 
+.input-mode-toggle {
+  display: flex;
+  gap: 0.5rem;
+  background: #f3f4f6;
+  padding: 0.35rem;
+  border-radius: 8px;
+  margin-bottom: 0.65rem;
+  width: fit-content;
+}
+
+.input-mode-toggle .mode-button {
+  flex: 1;
+  min-width: 80px;
+  text-align: center;
+}
+
+.not-open-notice {
+  font-size: 0.82rem;
+  color: #92400e;
+  background: #fef3c7;
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+  padding: 0.55rem 0.9rem;
+  margin-bottom: 0.65rem;
+  line-height: 1.45;
+  animation: fadeIn 0.2s ease;
+}
+
+.submit-error-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 0.84rem;
+  color: #991b1b;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  padding: 0.55rem 0.9rem;
+  margin-bottom: 0.65rem;
+  animation: fadeIn 0.2s ease;
+}
+
+.submit-error-retry {
+  flex-shrink: 0;
+  background: #dc2626;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 0.3rem 0.75rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.submit-error-retry:hover {
+  background: #b91c1c;
+}
+
 .chat-input-wrapper {
   display: flex;
   gap: 0.75rem;
-  max-width: 1000px;
-  margin: 0 auto;
 }
 
 .chat-input {
@@ -497,6 +559,12 @@ textarea {
   border-color: #6b7280;
 }
 
+.chat-input:disabled {
+  background: #f3f4f6;
+  color: #9ca3af;
+  cursor: not-allowed;
+}
+
 .btn-send {
   padding: 0.875rem 1.75rem;
   background: #1f2937;
@@ -504,6 +572,18 @@ textarea {
   border: none;
   border-radius: 10px;
   font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.btn-send-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
 }
 
 .btn-send:hover:not(:disabled) {
@@ -716,18 +796,46 @@ textarea {
   background: #9ca3af;
 }
 
-/* Responsive */
+/* Responsive — chat page slide-in sidebar */
 @media (max-width: 768px) {
   .chat-sidebar {
     position: fixed;
     top: 0;
     left: 0;
     bottom: 0;
-    width: min(86vw, 320px);
+    width: min(86vw, 320px) !important;
     transform: translateX(-100%);
     transition: transform 0.2s ease;
     z-index: 30;
     border-right: 1px solid #e5e7eb;
+  }
+
+  /* On mobile the sidebar is always full-width when open — ignore collapsed state */
+  .chat-sidebar.collapsed .roadmap-progress-header,
+  .chat-sidebar.collapsed .roadmap-category-info,
+  .chat-sidebar.collapsed .roadmap-category-progress-mini,
+  .chat-sidebar.collapsed .chat-user-info {
+    display: revert;
+  }
+
+  .chat-sidebar.collapsed .roadmap-category-item {
+    padding: 0.75rem 1rem !important;
+    display: block;
+  }
+
+  .chat-sidebar.collapsed .roadmap-category-row {
+    justify-content: flex-start;
+    gap: 0.75rem;
+  }
+
+  .chat-sidebar.collapsed .btn-new-conversation {
+    font-size: inherit;
+    height: auto;
+    padding: 0.75rem;
+  }
+
+  .chat-sidebar.collapsed .btn-new-conversation::after {
+    content: none;
   }
 
   .chat-sidebar.mobile-open {
@@ -774,6 +882,85 @@ textarea {
 
   .step-nav-category {
     display: none;
+  }
+
+  /* Icon-only nav buttons on mobile */
+  .step-nav-btn {
+    padding: 0.4rem 0.65rem;
+    min-width: 0;
+    font-size: 1rem;
+  }
+
+  .step-nav-label {
+    display: none;
+  }
+
+  /* Icon-only send button on mobile */
+  .btn-send {
+    padding: 0.75rem;
+    min-width: 0;
+  }
+
+  .btn-send-label {
+    display: none;
+  }
+
+  .btn-send-icon {
+    font-size: 1rem;
+    line-height: 1;
+  }
+
+  /* Shorter placeholder text on mobile */
+  .chat-input::placeholder {
+    font-size: 0.82rem;
+  }
+}
+
+/* Roadmap page mobile — always-visible icon rail, no slide-in */
+@media (max-width: 768px) {
+  .roadmap-page .chat-sidebar {
+    position: relative !important;
+    width: 64px !important;
+    transform: none !important;
+    transition: width 0.2s ease;
+    z-index: auto !important;
+    flex-shrink: 0;
+    overflow: hidden;
+  }
+
+  /* Force icon-only on mobile regardless of JS collapsed state */
+  .roadmap-page .chat-sidebar .roadmap-progress-header,
+  .roadmap-page .chat-sidebar .roadmap-category-info,
+  .roadmap-page .chat-sidebar .roadmap-category-progress-mini,
+  .roadmap-page .chat-sidebar .chat-user-info,
+  .roadmap-page .chat-sidebar .sidebar-top-row {
+    display: none !important;
+  }
+
+  .roadmap-page .chat-sidebar .roadmap-category-item {
+    padding: 0.6rem 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+  }
+
+  .roadmap-page .chat-sidebar .roadmap-category-row {
+    justify-content: center !important;
+    gap: 0 !important;
+  }
+
+  .roadmap-page .chat-sidebar .conversations-list > div:first-child {
+    display: none !important;
+  }
+
+  /* Mobile roadmap header — just shows category title */
+  .roadmap-page .mobile-chat-header {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.5rem 1rem;
+    border-bottom: 1px solid #e5e7eb;
+    background: #ffffff;
   }
 }
 
@@ -929,7 +1116,7 @@ textarea {
 
 .roadmap-category-item.locked {
   opacity: 0.5;
-  cursor: not-allowed !important;
+  cursor: pointer !important;
 }
 
 .roadmap-category-row {
@@ -941,6 +1128,50 @@ textarea {
 .roadmap-category-icon {
   font-size: 1.25rem;
   flex-shrink: 0;
+  position: relative;
+  display: inline-block;
+}
+
+.roadmap-category-icon-badge {
+  position: absolute;
+  bottom: -1px;
+  right: -3px;
+  width: 8px !important;
+  height: 8px !important;
+  border: 1.5px solid white;
+}
+
+/* Collapsed roadmap sidebar — icon only */
+.chat-sidebar.collapsed .roadmap-progress-header,
+.chat-sidebar.collapsed .roadmap-category-info,
+.chat-sidebar.collapsed .roadmap-category-progress-mini,
+.chat-sidebar.collapsed .chat-user-info,
+.chat-sidebar.collapsed .roadmap-progress-header {
+  display: none;
+}
+
+.chat-sidebar.collapsed .roadmap-category-item {
+  padding: 0.6rem 0 !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.chat-sidebar.collapsed .roadmap-category-row {
+  justify-content: center;
+  gap: 0;
+}
+
+.chat-sidebar.collapsed .btn-new-conversation {
+  font-size: 0;
+  height: 36px;
+  padding: 0;
+}
+
+.chat-sidebar.collapsed .btn-new-conversation::after {
+  content: '←';
+  font-size: 1rem;
+  font-weight: 700;
 }
 
 .roadmap-category-info {
@@ -993,6 +1224,146 @@ textarea {
   transition: stroke-dasharray 0.4s ease;
 }
 
+/* ========== Category Locked Modal ========== */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(17, 24, 39, 0.55);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+}
+
+.modal-card {
+  background: white;
+  border-radius: 16px;
+  padding: 2rem 1.75rem;
+  max-width: 400px;
+  width: 100%;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+  text-align: center;
+  animation: modalIn 0.2s ease;
+}
+
+@keyframes modalIn {
+  from { opacity: 0; transform: scale(0.94) translateY(8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.modal-cat-icon {
+  font-size: 3rem;
+  margin-bottom: 0.75rem;
+  line-height: 1;
+}
+
+.modal-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #1f2937;
+  margin: 0 0 0.6rem;
+}
+
+.modal-body {
+  font-size: 0.9rem;
+  color: #6b7280;
+  margin-bottom: 1.1rem;
+  line-height: 1.5;
+}
+
+.modal-prereq-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  text-align: left;
+}
+
+.modal-prereq-item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.6rem 0.85rem;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.modal-prereq-icon {
+  font-size: 1.1rem;
+  flex-shrink: 0;
+}
+
+.modal-prereq-name {
+  flex: 1;
+  font-size: 0.88rem;
+  font-weight: 500;
+  color: #374151;
+}
+
+.modal-prereq-progress {
+  font-size: 0.76rem;
+  color: #9ca3af;
+  white-space: nowrap;
+}
+
+.modal-close-btn {
+  padding: 0.65rem 2rem;
+  background: #1f2937;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.modal-close-btn:hover {
+  background: #111827;
+}
+
+/* ========== Category Completed Banner ========== */
+
+.category-completed-banner {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  background: linear-gradient(135deg, #d1fae5, #a7f3d0);
+  border: 1.5px solid #10b981;
+  border-radius: 12px;
+  padding: 1.1rem 1.4rem;
+  margin: 0.75rem 1.5rem 0;
+  animation: bannerIn 0.4s ease;
+}
+
+@keyframes bannerIn {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.category-completed-icon {
+  font-size: 2.25rem;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.category-completed-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #065f46;
+}
+
+.category-completed-sub {
+  font-size: 0.82rem;
+  color: #047857;
+  margin-top: 0.2rem;
+}
+
 /* ========== Step Navigation ========== */
 
 .step-nav-header {
@@ -1014,6 +1385,9 @@ textarea {
   color: #374151;
   cursor: pointer;
   transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
 }
 
 .step-nav-btn:hover:not(:disabled) {

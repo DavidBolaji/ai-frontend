@@ -35,6 +35,15 @@ const CATEGORY_ICONS: Record<string, string> = {
   job: '💼',
 };
 
+// category key → keys it depends on (must all be completed to unlock)
+const CATEGORY_DEPENDENCIES: Record<string, string[]> = {
+  health: ['municipality'],
+  housing: ['municipality'],
+  job: ['municipality'],
+  education: ['municipality'],
+  permanent_residency: ['municipality', 'language'],
+};
+
 const STATUS_COLORS: Record<string, string> = {
   locked: '#9ca3af',
   not_started: '#6b7280',
@@ -50,6 +59,21 @@ const sortCategoriesStable = (cats: RoadmapCategoryOverview[]): RoadmapCategoryO
     return a.category.localeCompare(b.category);
   });
 };
+
+function PaperPlaneIcon() {
+  return (
+    <svg
+      viewBox="0 0 512 512"
+      width="15"
+      height="15"
+      fill="currentColor"
+      aria-hidden="true"
+      style={{ transform: 'rotate(45deg)', display: 'block', flexShrink: 0 }}
+    >
+      <path d="M498.1 5.6c10.1 7 15.4 19.1 13.5 31.2l-64 416c-1.5 9.7-7.4 18.2-16 23s-18.9 5.4-28 1.6L284 427.7l-68.5 74.1c-8.9 9.7-22.9 12.9-35.2 8.1S160 493.2 160 480V396.4c0-4 1.5-7.9 4.2-10.8L331.8 202.8c5.8-6.3 5.6-16-.4-22s-15.7-6.4-22-.7L106 360.8 17.7 316.6C7.1 311.3 .3 300.7 0 288.9s5.9-22.8 16.1-28.7l448-256c10.7-6.1 23.9-5.5 34 1.4z"/>
+    </svg>
+  );
+}
 
 interface StepChatMessage {
   id: string;
@@ -90,8 +114,28 @@ export default function Roadmap() {
   // Local answer selections (step id → selected value) — lets users pick before submitting
   const [selectedAnswers, setSelectedAnswers] = useState<Record<string, string>>({});
 
-  // Sidebar
-  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  // Sidebar — desktop starts expanded, mobile always shows icon rail (CSS-driven)
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+
+  // "Not open" tap notice for non-open steps
+  const [showNotOpenNotice, setShowNotOpenNotice] = useState(false);
+  const notOpenNoticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Submit error + retry
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const lastFailedAnswerRef = useRef<string>('');
+
+  // Locked category modal
+  const [lockedModal, setLockedModal] = useState<{
+    cat: RoadmapCategoryOverview;
+    prereqs: RoadmapCategoryOverview[];
+  } | null>(null);
+
+  // Category completed banner
+  const [categoryCompletedBanner, setCategoryCompletedBanner] = useState<{
+    label: string;
+    icon: string;
+  } | null>(null);
 
   // Initialize
   useEffect(() => {
@@ -123,13 +167,18 @@ export default function Roadmap() {
     }
   }, [currentStepIndex, steps]);
 
+  const reloadCategoriesData = async (): Promise<RoadmapCategoryOverview[]> => {
+    const roadmap = await apiClient.getRoadmap();
+    const cats = sortCategoriesStable(roadmap.attributes.categories);
+    setCategories(cats);
+    setOverallProgress(roadmap.attributes.overall_progress_pct);
+    return cats;
+  };
+
   const loadRoadmap = async () => {
     setRoadmapLoading(true);
     try {
-      const roadmap = await apiClient.getRoadmap();
-      const cats = sortCategoriesStable(roadmap.attributes.categories);
-      setCategories(cats);
-      setOverallProgress(roadmap.attributes.overall_progress_pct);
+      const cats = await reloadCategoriesData();
 
       // Default to municipality (first category) or first unlocked
       const municipality = cats.find(c => c.category === 'municipality');
@@ -149,7 +198,6 @@ export default function Roadmap() {
   };
 
   const selectCategory = async (categoryId: string, categoryName: string) => {
-    setIsMobileSidebarOpen(false);
     setSelectedCategoryId(categoryId);
     setSelectedCategoryName(categoryName);
     setStepsLoading(true);
@@ -292,6 +340,8 @@ export default function Roadmap() {
     const step = steps[currentStepIndex];
     if (!step) return;
 
+    lastFailedAnswerRef.current = answer;
+    setSubmitError(null);
     setIsSending(true);
     try {
       const resp = await apiClient.answerStep(step.id, answer);
@@ -411,13 +461,28 @@ export default function Roadmap() {
         }
       }
 
-      // If category completed, reload roadmap to check unlocked categories
+      // If category completed, show banner and auto-navigate to next unlocked category
       if (category_completed) {
-        loadRoadmap();
+        const completedLabel = CATEGORY_LABELS[selectedCategoryName] || selectedCategoryName;
+        const completedIcon = CATEGORY_ICONS[selectedCategoryName] || '📌';
+        setCategoryCompletedBanner({ label: completedLabel, icon: completedIcon });
+        try {
+          const freshCats = await reloadCategoriesData();
+          const currentCatIdx = freshCats.findIndex(c => c.id === selectedCategoryId);
+          const nextCat = freshCats.slice(currentCatIdx + 1).find(c => c.status !== 'locked');
+          setTimeout(() => {
+            setCategoryCompletedBanner(null);
+            if (nextCat) {
+              selectCategory(nextCat.id, nextCat.category);
+            }
+          }, 2800);
+        } catch {
+          setTimeout(() => setCategoryCompletedBanner(null), 3000);
+        }
       }
     } catch (error) {
       console.error('Failed to answer step:', error);
-      alert('Failed to submit answer. Please try again.');
+      setSubmitError('Failed to submit your answer. Please try again.');
     } finally {
       setIsSending(false);
     }
@@ -467,18 +532,52 @@ export default function Roadmap() {
       : (currentStep?.metadata_?.content_blocks as ContentBlock[] | undefined)) || [];
 
   return (
-    <div className="chat-container">
-      {isMobileSidebarOpen && (
-        <div
-          className="mobile-sidebar-backdrop"
-          onClick={() => setIsMobileSidebarOpen(false)}
-          aria-hidden="true"
-        />
+    <div className="chat-container roadmap-page">
+      {/* Locked Category Modal */}
+      {lockedModal && (
+        <div className="modal-overlay" onClick={() => setLockedModal(null)}>
+          <div className="modal-card" onClick={e => e.stopPropagation()}>
+            <div className="modal-cat-icon">{CATEGORY_ICONS[lockedModal.cat.category] || '📌'}</div>
+            <h3 className="modal-title">{CATEGORY_LABELS[lockedModal.cat.category] || lockedModal.cat.category} is Locked 🔒</h3>
+            <p className="modal-body">
+              {lockedModal.prereqs.length > 0
+                ? `To unlock this category, you need to first complete ${
+                    lockedModal.prereqs.length === 1
+                      ? CATEGORY_LABELS[lockedModal.prereqs[0].category] || lockedModal.prereqs[0].category
+                      : lockedModal.prereqs.slice(0, -1).map(p => CATEGORY_LABELS[p.category] || p.category).join(', ') +
+                        ' and ' + (CATEGORY_LABELS[lockedModal.prereqs[lockedModal.prereqs.length - 1].category] || lockedModal.prereqs[lockedModal.prereqs.length - 1].category)
+                  }.`
+                : 'This category will unlock as you progress through your roadmap.'}
+            </p>
+            {lockedModal.prereqs.length > 0 && (
+              <ul className="modal-prereq-list">
+                {lockedModal.prereqs.map(p => (
+                  <li key={p.id} className="modal-prereq-item">
+                    <span className="modal-prereq-icon">{CATEGORY_ICONS[p.category] || '📌'}</span>
+                    <span className="modal-prereq-name">{CATEGORY_LABELS[p.category] || p.category}</span>
+                    <span className="modal-prereq-progress">{p.completed_steps}/{p.total_steps} done</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <button className="modal-close-btn" onClick={() => setLockedModal(null)}>Got it</button>
+          </div>
+        </div>
       )}
 
       {/* Category Sidebar */}
-      <div className={`chat-sidebar ${isMobileSidebarOpen ? 'mobile-open' : ''}`}>
+      <div className={`chat-sidebar ${isSidebarCollapsed ? 'collapsed' : ''}`}>
         <div className="chat-header">
+          <div className="sidebar-top-row">
+            <button
+              className="btn-sidebar-toggle"
+              onClick={() => setIsSidebarCollapsed((prev) => !prev)}
+              aria-label={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              type="button"
+            >
+              {isSidebarCollapsed ? '›' : '‹'}
+            </button>
+          </div>
           <div className="chat-user-info">
             <div>
               <div className="user-name">{user.fname} {user.lname}</div>
@@ -505,15 +604,31 @@ export default function Roadmap() {
           {categories.map((cat) => (
             <div
               key={cat.id}
+              title={CATEGORY_LABELS[cat.category] || cat.category}
               className={`conversation-item roadmap-category-item ${selectedCategoryId === cat.id ? 'active' : ''} ${cat.status === 'locked' ? 'locked' : ''}`}
-              onClick={() => cat.status !== 'locked' && selectCategory(cat.id, cat.category)}
+              onClick={() => {
+                if (cat.status === 'locked') {
+                  const depKeys = CATEGORY_DEPENDENCIES[cat.category] ?? [];
+                  const prereqs = depKeys
+                    .map(key => categories.find(c => c.category === key))
+                    .filter((c): c is RoadmapCategoryOverview => !!c && c.status !== 'completed');
+                  setLockedModal({ cat, prereqs });
+                } else {
+                  selectCategory(cat.id, cat.category);
+                }
+              }}
             >
               <div className="roadmap-category-row">
-                <span className="roadmap-category-icon">{CATEGORY_ICONS[cat.category] || '📌'}</span>
+                <span className="roadmap-category-icon" style={{ position: 'relative' }}>
+                  {CATEGORY_ICONS[cat.category] || '📌'}
+                  <span
+                    className="roadmap-status-dot roadmap-category-icon-badge"
+                    style={{ background: STATUS_COLORS[cat.status] || '#6b7280' }}
+                  />
+                </span>
                 <div className="roadmap-category-info">
                   <div className="conversation-title">{CATEGORY_LABELS[cat.category] || cat.category}</div>
                   <div className="roadmap-category-meta">
-                    <span className="roadmap-status-dot" style={{ background: STATUS_COLORS[cat.status] || '#6b7280' }} />
                     <span className="roadmap-category-status">
                       {cat.status === 'locked' ? '🔒 Locked' : `${cat.completed_steps}/${cat.total_steps} steps`}
                     </span>
@@ -544,14 +659,6 @@ export default function Roadmap() {
       {/* Main Content */}
       <div className="chat-main">
         <div className="mobile-chat-header">
-          <button
-            type="button"
-            className="btn-mobile-menu"
-            onClick={() => setIsMobileSidebarOpen(true)}
-            aria-label="Open categories"
-          >
-            Menu
-          </button>
           <div className="mobile-chat-title">
             {CATEGORY_ICONS[selectedCategoryName]} {CATEGORY_LABELS[selectedCategoryName] || 'Roadmap'}
           </div>
@@ -565,7 +672,8 @@ export default function Roadmap() {
               onClick={() => goToStep(currentStepIndex - 1)}
               disabled={currentStepIndex === 0}
             >
-              ← Previous
+              <span className="step-nav-arrow" aria-hidden="true">←</span>
+              <span className="step-nav-label">Previous</span>
             </button>
 
             <div className="step-nav-info">
@@ -582,8 +690,22 @@ export default function Roadmap() {
               onClick={() => goToStep(currentStepIndex + 1)}
               disabled={isSending || steps.length === 0}
             >
-              {currentStepIndex >= steps.length - 1 ? 'Submit →' : 'Next →'}
+              {currentStepIndex >= steps.length - 1
+                ? (<><span className="step-nav-label">Submit</span><span className="step-nav-arrow" aria-hidden="true">→</span></>)
+                : (<><span className="step-nav-label">Next</span><span className="step-nav-arrow" aria-hidden="true">→</span></>)
+              }
             </button>
+          </div>
+        )}
+
+        {/* Category Completed Banner */}
+        {categoryCompletedBanner && (
+          <div className="category-completed-banner">
+            <span className="category-completed-icon">{categoryCompletedBanner.icon}</span>
+            <div>
+              <div className="category-completed-title">🎉 {categoryCompletedBanner.label} Complete!</div>
+              <div className="category-completed-sub">Moving to your next category...</div>
+            </div>
           </div>
         )}
 
@@ -742,16 +864,53 @@ export default function Roadmap() {
 
         {/* Chat Input */}
         <div className="chat-input-container">
+          {/* Mode toggle */}
+          <div className="input-mode-toggle">
+            <button className="mode-button" onClick={() => router.push('/chat')}>Ask</button>
+            <button className="mode-button active">Roadmap</button>
+          </div>
+          {showNotOpenNotice && (
+            <div className="not-open-notice">
+              This question has fixed options — use the buttons above to answer.
+              To ask a free-form question, switch to the <strong>Ask</strong> tab.
+            </div>
+          )}
+          {submitError && (
+            <div className="submit-error-banner">
+              <span>{submitError}</span>
+              <button
+                type="button"
+                className="submit-error-retry"
+                onClick={() => { setSubmitError(null); handleAnswerStep(lastFailedAnswerRef.current); }}
+              >
+                Try again
+              </button>
+            </div>
+          )}
           <form onSubmit={handleSendMessage} className="chat-input-wrapper">
             <textarea
               className="chat-input"
               placeholder={currentStep && currentStep.question_type === 'open'
-                ? (currentStep.answer ? 'Change your answer...' : 'Type your answer...')
-                : 'Ask a question about this step...'
+                ? (currentStep.answer ? 'Update answer...' : 'Your answer...')
+                : 'Use the buttons above to answer...'
               }
               value={inputMessage}
-              onChange={(e) => setInputMessage(e.target.value)}
+              onChange={(e) => {
+                if (currentStep && currentStep.question_type !== 'open') return;
+                setInputMessage(e.target.value);
+              }}
+              onClick={() => {
+                if (currentStep && currentStep.question_type !== 'open') {
+                  if (notOpenNoticeTimer.current) clearTimeout(notOpenNoticeTimer.current);
+                  setShowNotOpenNotice(true);
+                  notOpenNoticeTimer.current = setTimeout(() => setShowNotOpenNotice(false), 3500);
+                }
+              }}
               onKeyDown={(e) => {
+                if (currentStep && currentStep.question_type !== 'open') {
+                  e.preventDefault();
+                  return;
+                }
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
                   handleSendMessage(e as any);
@@ -759,13 +918,16 @@ export default function Roadmap() {
               }}
               rows={1}
               disabled={isSending}
+              readOnly={!!(currentStep && currentStep.question_type !== 'open')}
+              style={currentStep && currentStep.question_type !== 'open' ? { cursor: 'pointer' } : undefined}
             />
             <button
               type="submit"
               className="btn-send"
               disabled={isSending || !inputMessage.trim()}
             >
-              {isSending ? 'Sending...' : 'Send'}
+              <span className="btn-send-icon"><PaperPlaneIcon /></span>
+              <span className="btn-send-label">{isSending ? 'Sending...' : 'Send'}</span>
             </button>
           </form>
         </div>
