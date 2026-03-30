@@ -1,11 +1,13 @@
 // TypeScript types matching the backend schemas
 
 export interface ContentBlock {
-  type: 'text' | 'heading' | 'list' | 'quote' | 'link' | 'source';
+  type: 'text' | 'heading' | 'list' | 'quote' | 'link' | 'table' | 'source' | 'hr';
   content?: string;
   level?: number;
   ordered?: boolean;
   items?: string[];
+  headers?: string[];
+  rows?: string[][];
   source?: string;
   text?: string;
   url?: string;
@@ -178,7 +180,7 @@ export interface StepOption {
 export interface OnboardingQuestion {
   key: string;
   question: string;
-  type: 'open' | 'single_choice' | 'multi_choice' | 'yes_no' | 'info';
+  type: 'open' | 'single_choice' | 'multi_choice' | 'yes_no' | 'info' | 'exit';
   options?: StepOption[];
   metadata?: Record<string, any> | null;
   content_blocks?: ContentBlock[];
@@ -214,6 +216,42 @@ export interface OnboardingValidationError {
   attributes: {
     error: string;
     suggestion?: string;
+  };
+}
+
+export interface PostcodeResolutionResponse {
+  type: 'postcode-resolution';
+  id: string;
+  attributes: {
+    city: string | null;
+    postcode: string;
+    resolved: boolean;
+  };
+}
+
+export interface OnboardingHistoryItem {
+  key: string;
+  question: string;
+  answer: string;
+}
+
+export interface OnboardingHistoryResponse {
+  type: 'onboarding-history';
+  id: string;
+  attributes: { history: OnboardingHistoryItem[] };
+}
+
+export interface OnboardingSessionResponse {
+  type: 'onboarding-session';
+  id: string;
+  attributes: {
+    answers: Record<string, string>;
+    /** Backend-driven status:
+     *  - none        → no saved session; start fresh
+     *  - in_progress → partial answers; resume
+     *  - closed      → user declined to continue (exit question is next)
+     */
+    status: 'none' | 'in_progress' | 'closed';
   };
 }
 
@@ -291,6 +329,7 @@ export interface AnswerStepResponse {
     reset_steps?: RoadmapStepDetail[];
     deleted_step_ids?: string[];
     category_progress_pct: number;
+    category_completed_steps?: number;
     category_completed: boolean;
     routed_to_chat?: boolean;
     chat_response?: {
@@ -299,6 +338,8 @@ export interface AnswerStepResponse {
       content_blocks: ContentBlock[];
     };
     validation_error?: string;
+    gate_blocked?: boolean;
+    gate_message?: string;
   };
 }
 

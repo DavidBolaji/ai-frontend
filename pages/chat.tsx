@@ -27,13 +27,7 @@ const SOURCE_TAG_CACHE_KEY = 'sourceTagCacheByConversation';
 
 type SourceTagCache = Record<string, Record<string, string[]>>;
 
-const ONBOARDING_REPLY_DELAY_MIN = 300;
-const ONBOARDING_REPLY_DELAY_MAX = 800;
-
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-const randomDelay = () =>
-  Math.floor(Math.random() * (ONBOARDING_REPLY_DELAY_MAX - ONBOARDING_REPLY_DELAY_MIN + 1)) + ONBOARDING_REPLY_DELAY_MIN;
 
 function PaperPlaneIcon() {
   return (
@@ -147,6 +141,7 @@ export default function Chat() {
   const [onboardingActive, setOnboardingActive] = useState(false);
   const [onboardingSubmitting, setOnboardingSubmitting] = useState(false);
   const [onboardingProgress, setOnboardingProgress] = useState<{ current: number; total: number }>({ current: 0, total: 0 });
+  const [onboardingRestartPrompt, setOnboardingRestartPrompt] = useState(false);
   const [roadmapCreating, setRoadmapCreating] = useState(false);
   const [roadmapProgress, setRoadmapProgress] = useState<number>(0);
   const [roadmapProgressMessage, setRoadmapProgressMessage] = useState<string>('Preparing your roadmap...');
@@ -450,10 +445,84 @@ export default function Chat() {
       onboardingAnswersRef.current = {};
       setOnboardingQuestion(null);
       setRoadmapCreating(false);
+      setOnboardingRestartPrompt(false);
       setMessages([]);
 
+      // Load saved session from backend
+      let initialAnswers: Record<string, string> = {};
+      let sessionStatus: 'none' | 'in_progress' | 'closed' = 'none';
       try {
-        const resp = await apiClient.getNextOnboardingQuestion({});
+        const sessionResp = await apiClient.getOnboardingSession();
+        initialAnswers = sessionResp.attributes.answers;
+        sessionStatus = sessionResp.attributes.status;
+      } catch { /* ignore — start fresh */ }
+
+      // Previously-closed session: show goodbye history + restart prompt
+      if (sessionStatus === 'closed') {
+        setOnboardingActive(false);
+        try {
+          const [historyResp, nextResp] = await Promise.all([
+            apiClient.getOnboardingHistory(initialAnswers),
+            apiClient.getNextOnboardingQuestion(initialAnswers),
+          ]);
+          const historyMessages: DisplayMessage[] = [];
+          for (const item of historyResp.attributes.history) {
+            historyMessages.push({
+              id: `resume-q-${item.key}`,
+              role: 'assistant',
+              content: item.question,
+              content_blocks: [{ type: 'text', content: item.question }],
+            });
+            historyMessages.push({ id: `resume-a-${item.key}`, role: 'user', content: item.answer });
+          }
+          // Show the exit message itself
+          const exitQ = nextResp.attributes.question;
+          if (exitQ) {
+            historyMessages.push({
+              id: `onboarding-q-${exitQ.key}`,
+              role: 'assistant',
+              content: exitQ.question,
+              content_blocks: exitQ.content_blocks || [{ type: 'text', content: exitQ.question }],
+            });
+          }
+          // Restart prompt — message comes from backend exit question metadata
+          const restartText = exitQ?.metadata?.restart_prompt as string | undefined;
+          if (restartText) {
+            historyMessages.push({
+              id: 'onboarding-restart-prompt',
+              role: 'assistant',
+              content: restartText,
+              content_blocks: [{ type: 'text', content: restartText }],
+            });
+          }
+          setMessages(historyMessages);
+        } catch {
+          // History fetch failed — clear session and start fresh silently
+          try { await apiClient.deleteOnboardingSession(); } catch { /* ignore */ }
+          setOnboardingRestartPrompt(false);
+          setOnboardingActive(true);
+          // fall through to the normal fresh-start flow below
+          return;
+        }
+        setOnboardingRestartPrompt(true);
+        return;
+      }
+
+      const isResume = sessionStatus === 'in_progress';
+      if (isResume) {
+        setOnboardingAnswers(initialAnswers);
+        onboardingAnswersRef.current = initialAnswers;
+      }
+
+      try {
+        // For resume: fetch history + next question in parallel
+        const [historyResp, resp] = isResume
+          ? await Promise.all([
+              apiClient.getOnboardingHistory(initialAnswers),
+              apiClient.getNextOnboardingQuestion(initialAnswers),
+            ])
+          : [null, await apiClient.getNextOnboardingQuestion(initialAnswers)];
+
         const q = resp.attributes.question;
         const progress = resp.attributes.progress;
 
@@ -461,14 +530,41 @@ export default function Chat() {
 
         if (q) {
           setOnboardingQuestion(q);
-          setMessages([
-            {
-              id: `onboarding-q-${progress.current_index}`,
+
+          if (isResume && historyResp && historyResp.attributes.history.length > 0) {
+            // Rebuild the full conversation from saved Q&A pairs + current question
+            const historyMessages: DisplayMessage[] = [];
+            for (const item of historyResp.attributes.history) {
+              historyMessages.push({
+                id: `resume-q-${item.key}`,
+                role: 'assistant',
+                content: item.question,
+                content_blocks: [{ type: 'text', content: item.question }],
+              });
+              historyMessages.push({
+                id: `resume-a-${item.key}`,
+                role: 'user',
+                content: item.answer,
+              });
+            }
+            // Append the current (unanswered) question at the end
+            historyMessages.push({
+              id: `onboarding-q-${q.key}`,
               role: 'assistant',
               content: q.question,
               content_blocks: q.content_blocks || [{ type: 'text', content: q.question }],
-            },
-          ]);
+            });
+            setMessages(historyMessages);
+          } else {
+            setMessages([
+              {
+                id: `onboarding-q-${progress.current_index}`,
+                role: 'assistant',
+                content: q.question,
+                content_blocks: q.content_blocks || [{ type: 'text', content: q.question }],
+              },
+            ]);
+          }
         }
       } catch (error) {
         console.error('Failed to load onboarding:', error);
@@ -483,6 +579,7 @@ export default function Chat() {
     } else {
       // Switch back to ask mode
       setOnboardingActive(false);
+      setOnboardingRestartPrompt(false);
       setOnboardingQuestion(null);
       setOnboardingAnswers({});
       onboardingAnswersRef.current = {};
@@ -507,6 +604,7 @@ export default function Chat() {
         },
       });
 
+      // Backend automatically clears the onboarding session on roadmap creation.
       // Keep showing the progress card and redirect immediately after completion.
       setRoadmapProgress(100);
       setRoadmapProgressMessage('Your roadmap is ready!');
@@ -525,15 +623,60 @@ export default function Chat() {
     }
   };
 
+  /** Called when the user responds to the "start fresh?" restart prompt. */
+  const handleRestartDecision = async (answer: 'yes' | 'no') => {
+    setOnboardingRestartPrompt(false);
+    if (answer === 'yes') {
+      // Clear the closed session so onboarding starts from the first question
+      try { await apiClient.deleteOnboardingSession(); } catch { /* ignore */ }
+      setOnboardingActive(true);
+      setOnboardingAnswers({});
+      onboardingAnswersRef.current = {};
+      setOnboardingQuestion(null);
+      setRoadmapCreating(false);
+      setMessages([]);
+      try {
+        const resp = await apiClient.getNextOnboardingQuestion({});
+        const q = resp.attributes.question;
+        const progress = resp.attributes.progress;
+        setOnboardingProgress({ current: progress.current_index + 1, total: progress.total_questions });
+        if (q) {
+          setOnboardingQuestion(q);
+          setMessages([{
+            id: `onboarding-q-${progress.current_index}`,
+            role: 'assistant',
+            content: q.question,
+            content_blocks: q.content_blocks || [{ type: 'text', content: q.question }],
+          }]);
+        }
+      } catch {
+        setOnboardingActive(false);
+      }
+    } else {
+      // User declines restart → return to ask mode
+      setOnboardingActive(false);
+      setOnboardingQuestion(null);
+      setOnboardingAnswers({});
+      onboardingAnswersRef.current = {};
+      setOnboardingProgress({ current: 0, total: 0 });
+      setRoadmapCreating(false);
+      setMessages([]);
+      loadWelcomeMessage();
+    }
+  };
+
   const handleOnboardingAnswer = async (answer: string) => {
     if (!onboardingQuestion || onboardingSubmitting) return;
 
     const currentQ = onboardingQuestion;
     const questionKey = currentQ.key;
 
-    // Add user answer to messages
+    // Add user answer to messages — suffix with timestamp to ensure uniqueness
+    // when the same question key is re-asked (e.g. municipality_city after
+    // postcode confirm "no").
+    const msgTs = Date.now();
     setMessages(prev => [...prev, {
-      id: `onboarding-a-${questionKey}`,
+      id: `onboarding-a-${questionKey}-${msgTs}`,
       role: 'user',
       content: answer,
     }]);
@@ -552,34 +695,49 @@ export default function Chat() {
 
       const { question: nextQ, progress } = resp.attributes;
 
-      // Merge answer into local state AND ref
-      const updatedAnswers = { ...currentAnswers, [questionKey]: answer };
+      // Use backend's authoritative answered dict — it may have mutated keys
+      // (e.g. resolved a postcode, cleared fields on confirm "no").
+      const updatedAnswers: Record<string, string> = progress.answered ?? { ...currentAnswers, [questionKey]: answer };
       setOnboardingAnswers(updatedAnswers);
       onboardingAnswersRef.current = updatedAnswers;
+      // Progress is saved automatically by the backend answer endpoint
       setOnboardingProgress({ current: progress.current_index + 1, total: progress.total_questions });
-
-      // Add a short variable pause so onboarding feels conversational, not robotic.
-      await sleep(randomDelay());
 
       if (progress.is_complete) {
         await finishOnboarding(updatedAnswers);
       } else if (nextQ) {
-        setOnboardingQuestion(nextQ);
-
-        // Handle 'info' type questions — show progress card and complete roadmap
-        if (nextQ.type === 'info') {
-          // Include the info answer directly, skip the round-trip
-          const finalAnswers = { ...updatedAnswers, [nextQ.key]: 'acknowledged' };
-          setOnboardingAnswers(finalAnswers);
-          onboardingAnswersRef.current = finalAnswers;
-          await finishOnboarding(finalAnswers);
-        } else {
+        if (nextQ.type === 'exit') {
+          // Graceful close — show the goodbye message but do NOT create a roadmap
           setMessages(prev => [...prev, {
-            id: `onboarding-q-${nextQ.key}`,
+            id: `onboarding-q-${nextQ.key}-${Date.now()}`,
             role: 'assistant',
             content: nextQ.question,
             content_blocks: nextQ.content_blocks || [{ type: 'text', content: nextQ.question }],
           }]);
+          // Remove the saved session since the user is closing onboarding
+          try { await apiClient.deleteOnboardingSession(); } catch { /* ignore */ }
+          setOnboardingQuestion(null);
+          setOnboardingActive(false);
+          setOnboardingAnswers({});
+          onboardingAnswersRef.current = {};
+        } else {
+          setOnboardingQuestion(nextQ);
+
+          // Handle 'info' type questions — show progress card and complete roadmap
+          if (nextQ.type === 'info') {
+            // Include the info answer directly, skip the round-trip
+            const finalAnswers = { ...updatedAnswers, [nextQ.key]: 'acknowledged' };
+            setOnboardingAnswers(finalAnswers);
+            onboardingAnswersRef.current = finalAnswers;
+            await finishOnboarding(finalAnswers);
+          } else {
+            setMessages(prev => [...prev, {
+              id: `onboarding-q-${nextQ.key}-${Date.now()}`,
+              role: 'assistant',
+              content: nextQ.question,
+              content_blocks: nextQ.content_blocks || [{ type: 'text', content: nextQ.question }],
+            }]);
+          }
         }
       }
     } catch (error: any) {
@@ -758,24 +916,38 @@ export default function Chat() {
             </div>
           )}
 
+          {/* Restart prompt buttons — shown when session was previously closed */}
+          {onboardingRestartPrompt && !onboardingActive && (
+            <div className="onboarding-options-wrap">
+              <div className="onboarding-options">
+                <button className="onboarding-option-btn" onClick={() => handleRestartDecision('yes')}>Yes, start fresh</button>
+                <button className="onboarding-option-btn" onClick={() => handleRestartDecision('no')}>No, thanks</button>
+              </div>
+            </div>
+          )}
+
           {/* Onboarding option buttons — directly under the question */}
           {onboardingActive && !roadmapCreating && onboardingQuestion && (() => {
             if (onboardingQuestion.type === 'yes_no') {
               return (
-                <div className="onboarding-options">
-                  <button className="onboarding-option-btn" onClick={() => handleOnboardingAnswer('yes')} disabled={onboardingSubmitting}>Yes</button>
-                  <button className="onboarding-option-btn" onClick={() => handleOnboardingAnswer('no')} disabled={onboardingSubmitting}>No</button>
+                <div className="onboarding-options-wrap">
+                  <div className="onboarding-options">
+                    <button className="onboarding-option-btn" onClick={() => handleOnboardingAnswer('yes')} disabled={onboardingSubmitting}>Yes</button>
+                    <button className="onboarding-option-btn" onClick={() => handleOnboardingAnswer('no')} disabled={onboardingSubmitting}>No</button>
+                  </div>
                 </div>
               );
             }
             if ((onboardingQuestion.type === 'single_choice' || onboardingQuestion.type === 'multi_choice') && onboardingQuestion.options) {
               return (
-                <div className="onboarding-options">
-                  {onboardingQuestion.options.map((opt) => (
-                    <button key={opt.value} className="onboarding-option-btn" onClick={() => handleOnboardingAnswer(opt.value)} disabled={onboardingSubmitting}>
-                      {opt.label}
-                    </button>
-                  ))}
+                <div className="onboarding-options-wrap">
+                  <div className="onboarding-options">
+                    {onboardingQuestion.options.map((opt) => (
+                      <button key={opt.value} className="onboarding-option-btn" onClick={() => handleOnboardingAnswer(opt.value)} disabled={onboardingSubmitting}>
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               );
             }

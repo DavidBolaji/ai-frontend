@@ -19,6 +19,9 @@ import type {
   AnswerStepResponse,
   StepChatResponse,
   StepChatHistoryResponse,
+  PostcodeResolutionResponse,
+  OnboardingHistoryResponse,
+  OnboardingSessionResponse,
 } from './types';
 
 const API_BASE_URL = '/api/proxy';
@@ -180,10 +183,32 @@ class ApiClient {
       headers['Authorization'] = `Bearer ${this.accessToken}`;
     }
 
-    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-      ...options,
-      headers,
-    });
+    // Give /ask endpoints extra time (local LLM can take 30s+); all others: 20s
+    const timeoutMs = endpoint.includes('/ask') ? 90_000 : 20_000;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    let response: Response;
+    try {
+      response = await fetch(`${API_BASE_URL}${endpoint}`, {
+        ...options,
+        headers,
+        signal: controller.signal,
+      });
+    } catch (err: any) {
+      clearTimeout(timeoutId);
+      if (err?.name === 'AbortError') {
+        const timeout: JsonApiErrorItem = {
+          status: '504',
+          code: 'request_timeout',
+          title: 'Request Timed Out',
+          detail: 'The server is taking too long to respond. Please try again.',
+        };
+        throw { errors: [timeout] } as ApiError;
+      }
+      throw err;
+    }
+    clearTimeout(timeoutId);
 
     // Handle 401 with token refresh
     if (response.status === 401 && retry && !endpoint.includes('/auth/')) {
@@ -481,6 +506,25 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify({ question_key: questionKey, answer }),
     });
+  }
+
+  async resolvePostcode(postcode: string): Promise<PostcodeResolutionResponse> {
+    return this.request<PostcodeResolutionResponse>(
+      `/roadmap/onboarding/resolve-postcode?postcode=${encodeURIComponent(postcode)}`,
+    );
+  }
+
+  async getOnboardingHistory(answers: Record<string, string>): Promise<OnboardingHistoryResponse> {
+    const encoded = encodeURIComponent(JSON.stringify(answers));
+    return this.request<OnboardingHistoryResponse>(`/roadmap/onboarding/history?answers=${encoded}`);
+  }
+
+  async getOnboardingSession(): Promise<OnboardingSessionResponse> {
+    return this.request<OnboardingSessionResponse>('/roadmap/onboarding/session');
+  }
+
+  async deleteOnboardingSession(): Promise<void> {
+    await this.request<void>('/roadmap/onboarding/session', { method: 'DELETE' });
   }
 
   async completeOnboarding(answers: Record<string, string>): Promise<RoadmapOverview> {

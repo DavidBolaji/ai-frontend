@@ -647,6 +647,12 @@ textarea {
   color: #4b5563;
 }
 
+.content-divider {
+  border: none;
+  border-top: 1px solid #e5e7eb;
+  margin: 1rem 0;
+}
+
 .content-link {
   color: #1f2937;
   text-decoration: underline;
@@ -654,6 +660,42 @@ textarea {
   word-break: break-word;
   display: inline-block;
   max-width: 100%;
+}
+
+/* Table */
+.content-table-wrapper {
+  overflow-x: auto;
+}
+
+.content-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+.content-table th,
+.content-table td {
+  border: 1px solid #d1d5db;
+  padding: 0.45rem 0.75rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.content-table thead tr {
+  background: #f3f4f6;
+}
+
+.content-table th {
+  font-weight: 600;
+  color: #111827;
+}
+
+.content-table tbody tr:nth-child(even) {
+  background: #f9fafb;
+}
+
+.content-table tbody tr:hover {
+  background: #eff6ff;
 }
 
 .chat-sidebar.collapsed .chat-user-info,
@@ -966,13 +1008,26 @@ textarea {
 
 /* ========== Onboarding option buttons ========== */
 
+.onboarding-options-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  align-self: flex-start;
+  margin-bottom: 1rem;
+}
+
 .onboarding-options {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
-  margin-bottom: 1rem;
-  align-self: flex-start;
   max-width: 70%;
+}
+
+.onboarding-options-hint {
+  font-size: 0.75rem;
+  color: #9ca3af;
+  padding-left: 0.25rem;
+  animation: fadeIn 0.3s ease;
 }
 
 .onboarding-option-btn {
@@ -984,7 +1039,7 @@ textarea {
   font-weight: 500;
   color: #374151;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all 0.2s ease;
 }
 
 .onboarding-option-btn:hover:not(:disabled) {
@@ -993,11 +1048,25 @@ textarea {
   border-color: #1f2937;
 }
 
+.onboarding-option-btn:active:not(:disabled) {
+  transform: scale(0.95);
+  background: #111827;
+  color: #ffffff;
+  border-color: #111827;
+}
+
 .onboarding-option-btn.selected {
   background: #1f2937;
   color: #ffffff;
   border-color: #1f2937;
   box-shadow: 0 0 0 2px rgba(31, 41, 55, 0.3);
+  animation: optionSelectedFlash 0.25s ease;
+}
+
+@keyframes optionSelectedFlash {
+  0% { transform: scale(1); }
+  40% { transform: scale(0.95); background: #374151; }
+  100% { transform: scale(1); background: #1f2937; }
 }
 
 .onboarding-option-btn:disabled {
@@ -1513,4 +1582,55 @@ textarea {
 .step-open-answer-text {
   font-size: 0.9rem;
   color: #374151;
+}
+
+/* ── Print / PDF styles for Step 5 BSN guide ────────────────────────────── */
+@media print {
+  .chat-sidebar,
+  .step-nav-header,
+  .chat-input-container,
+  .input-mode-toggle,
+  .mobile-chat-header,
+  .step-options-inline,
+  .category-completed-banner {
+    display: none !important;
+  }
+
+  /* Break the fixed-height viewport so all content flows across pages */
+  .chat-container {
+    height: auto !important;
+    overflow: visible !important;
+    display: block !important;
+  }
+
+  .chat-main {
+    margin: 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+    overflow: visible !important;
+    height: auto !important;
+    display: block !important;
+  }
+
+  .messages-container {
+    overflow: visible !important;
+    max-height: none !important;
+    height: auto !important;
+    padding: 1rem !important;
+    display: block !important;
+  }
+
+  .message.assistant {
+    background: none !important;
+    box-shadow: none !important;
+    border: none !important;
+    page-break-inside: avoid;
+    max-width: 100% !important;
+  }
+
+  body {
+    font-size: 12pt;
+    color: #000;
+    background: #fff;
+  }
 }

@@ -98,6 +98,11 @@ export default function Roadmap() {
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const [selectedCategoryName, setSelectedCategoryName] = useState('');
 
+  // Monotonically increasing counter — each selectCategory call increments it.
+  // After any await, we check the counter still matches; if not, the response
+  // is stale (a newer selectCategory call has started) and we discard it.
+  const categoryLoadGenRef = useRef(0);
+
   // Steps
   const [steps, setSteps] = useState<RoadmapStepDetail[]>([]);
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
@@ -125,11 +130,16 @@ export default function Roadmap() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const lastFailedAnswerRef = useRef<string>('');
 
-  // Locked category modal
-  const [lockedModal, setLockedModal] = useState<{
-    cat: RoadmapCategoryOverview;
-    prereqs: RoadmapCategoryOverview[];
-  } | null>(null);
+  // Checklist selections (step id → set of selected values)
+  const [checklistSelections, setChecklistSelections] = useState<Record<string, Set<string>>>({});
+
+  // BSN gate state (municipality Step 5 only)
+  const [bsnPromptVisible, setBsnPromptVisible] = useState(false);
+  const [bsnFrozen, setBsnFrozen] = useState(false);
+  const [bsnGateMessage, setBsnGateMessage] = useState<string | null>(null);
+  const [bsnCountdownSec, setBsnCountdownSec] = useState<number | null>(null);
+  const bsnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const bsnCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Category completed banner
   const [categoryCompletedBanner, setCategoryCompletedBanner] = useState<{
@@ -165,6 +175,75 @@ export default function Roadmap() {
     } else {
       setInputMessage('');
     }
+
+    // Pre-populate checklist selections from saved answer when revisiting a completed multi_choice step
+    if (step.question_type === 'multi_choice' && step.metadata_?.input_mode === 'checklist' && step.answer && step.answer !== 'none') {
+      setChecklistSelections(prev => {
+        if (prev[step.id] && prev[step.id].size > 0) return prev; // already populated
+        const saved = new Set(step.answer!.split(',').map(v => v.trim()).filter(Boolean));
+        return { ...prev, [step.id]: saved };
+      });
+    }
+
+    // Reset BSN gate UI when navigating off step 5
+    if (step.question_key !== 'post_registration_info') {
+      if (bsnTimerRef.current) clearTimeout(bsnTimerRef.current);
+      if (bsnCountdownRef.current) clearInterval(bsnCountdownRef.current);
+      setBsnPromptVisible(false);
+      setBsnFrozen(false);
+      setBsnGateMessage(null);
+      setBsnCountdownSec(null);
+    }
+  }, [currentStepIndex, steps]);
+
+  // BSN timer: driven by server-side first_viewed_at — survives page refresh / re-navigation
+  useEffect(() => {
+    if (bsnTimerRef.current) clearTimeout(bsnTimerRef.current);
+    if (bsnCountdownRef.current) clearInterval(bsnCountdownRef.current);
+
+    const step = steps[currentStepIndex];
+    if (!step || step.question_key !== 'post_registration_info') return;
+    if (step.answer === 'bsn_received') return;
+
+    const meta = step.metadata_ as any;
+    // Server already confirmed the delay has elapsed
+    if (meta?.bsn_gate_ready) {
+      setBsnPromptVisible(true);
+      setBsnCountdownSec(null);
+      return;
+    }
+    // Compute remaining time from absolute server timestamp
+    if (meta?.bsn_gate_opens_at) {
+      const opensAt = new Date(meta.bsn_gate_opens_at).getTime();
+      const remaining = opensAt - Date.now();
+      if (remaining <= 0) {
+        setBsnPromptVisible(true);
+        setBsnCountdownSec(null);
+      } else {
+        setBsnCountdownSec(Math.ceil(remaining / 1000));
+        bsnCountdownRef.current = setInterval(() => {
+          const left = Math.ceil((opensAt - Date.now()) / 1000);
+          if (left <= 0) {
+            if (bsnCountdownRef.current) clearInterval(bsnCountdownRef.current);
+            setBsnCountdownSec(null);
+            setBsnPromptVisible(true);
+          } else {
+            setBsnCountdownSec(left);
+          }
+        }, 1000);
+        bsnTimerRef.current = setTimeout(() => {
+          if (bsnCountdownRef.current) clearInterval(bsnCountdownRef.current);
+          setBsnCountdownSec(null);
+          setBsnPromptVisible(true);
+        }, remaining);
+      }
+    }
+
+    return () => {
+      if (bsnTimerRef.current) clearTimeout(bsnTimerRef.current);
+      if (bsnCountdownRef.current) clearInterval(bsnCountdownRef.current);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentStepIndex, steps]);
 
   const reloadCategoriesData = async (): Promise<RoadmapCategoryOverview[]> => {
@@ -180,13 +259,12 @@ export default function Roadmap() {
     try {
       const cats = await reloadCategoriesData();
 
-      // Default to municipality (first category) or first unlocked
+      // Default to municipality or first available category
       const municipality = cats.find(c => c.category === 'municipality');
-      const firstUnlocked = cats.find(c => c.status !== 'locked') || cats[0];
-      const defaultCat = municipality && municipality.status !== 'locked' ? municipality : firstUnlocked;
+      const defaultCat = municipality || cats[0];
 
       if (defaultCat) {
-        selectCategory(defaultCat.id, defaultCat.category);
+        await selectCategory(defaultCat.id, defaultCat.category);
       }
     } catch (error) {
       console.error('Failed to load roadmap:', error);
@@ -198,6 +276,15 @@ export default function Roadmap() {
   };
 
   const selectCategory = async (categoryId: string, categoryName: string) => {
+    // Claim this load generation — any earlier in-flight calls become stale.
+    const gen = ++categoryLoadGenRef.current;
+
+    // Clear BSN timer and gate state when switching categories
+    if (bsnTimerRef.current) clearTimeout(bsnTimerRef.current);
+    setBsnPromptVisible(false);
+    setBsnFrozen(false);
+    setBsnGateMessage(null);
+
     setSelectedCategoryId(categoryId);
     setSelectedCategoryName(categoryName);
     setStepsLoading(true);
@@ -206,6 +293,10 @@ export default function Roadmap() {
 
     try {
       const detail = await apiClient.getCategoryDetail(categoryId);
+
+      // Discard if a newer selectCategory call has already started.
+      if (gen !== categoryLoadGenRef.current) return;
+
       const loadedSteps = detail.attributes.steps;
       setSteps(loadedSteps);
 
@@ -220,9 +311,13 @@ export default function Roadmap() {
         loadStepChat(loadedSteps[startIdx].id);
       }
     } catch (error) {
-      console.error('Failed to load category:', error);
+      if (gen === categoryLoadGenRef.current) {
+        console.error('Failed to load category:', error);
+      }
     } finally {
-      setStepsLoading(false);
+      if (gen === categoryLoadGenRef.current) {
+        setStepsLoading(false);
+      }
     }
   };
 
@@ -247,6 +342,14 @@ export default function Roadmap() {
 
   const selectOption = (stepId: string, value: string) => {
     setSelectedAnswers(prev => ({ ...prev, [stepId]: value }));
+    // Auto-advance for yes_no and single_choice — fire answer immediately
+    const step = steps[currentStepIndex];
+    if (step && step.id === stepId && !isSending) {
+      if (step.question_type === 'yes_no' || step.question_type === 'single_choice') {
+        // Small tick so state update flushes before handleAnswerStep reads it
+        setTimeout(() => handleAnswerStep(value), 0);
+      }
+    }
   };
 
   const getSelectedAnswer = (stepId: string): string | undefined => {
@@ -345,7 +448,17 @@ export default function Roadmap() {
     setIsSending(true);
     try {
       const resp = await apiClient.answerStep(step.id, answer);
-      const { completed_step, next_step, new_steps_added, reset_steps, deleted_step_ids, category_progress_pct, category_completed, routed_to_chat, chat_response, validation_error } = resp.attributes;
+      const { completed_step, next_step, new_steps_added, reset_steps, deleted_step_ids, category_progress_pct, category_completed_steps, category_completed, routed_to_chat, chat_response, validation_error, gate_blocked, gate_message } = resp.attributes;
+
+      // BSN gate: blocked answer — show gate message inline, stay on step
+      if (gate_blocked) {
+        if (answer === 'bsn_not_yet') {
+          setBsnFrozen(true);
+        }
+        setBsnGateMessage(gate_message || 'Please confirm your BSN status.');
+        setIsSending(false);
+        return;
+      }
 
       // If the answer failed data validation (e.g. invalid municipality),
       // show a helpful message and let the user correct their input.
@@ -425,7 +538,7 @@ export default function Roadmap() {
       // Update category progress in sidebar
       setCategories(prev => prev.map(c =>
         c.id === selectedCategoryId
-          ? { ...c, progress_pct: category_progress_pct, status: category_completed ? 'completed' : 'in_progress', completed_steps: Math.round((category_progress_pct / 100) * c.total_steps) }
+          ? { ...c, progress_pct: category_progress_pct, status: category_completed ? 'completed' : 'in_progress', completed_steps: category_completed_steps ?? Math.round((category_progress_pct / 100) * c.total_steps) }
           : c
       ));
 
@@ -533,38 +646,6 @@ export default function Roadmap() {
 
   return (
     <div className="chat-container roadmap-page">
-      {/* Locked Category Modal */}
-      {lockedModal && (
-        <div className="modal-overlay" onClick={() => setLockedModal(null)}>
-          <div className="modal-card" onClick={e => e.stopPropagation()}>
-            <div className="modal-cat-icon">{CATEGORY_ICONS[lockedModal.cat.category] || '📌'}</div>
-            <h3 className="modal-title">{CATEGORY_LABELS[lockedModal.cat.category] || lockedModal.cat.category} is Locked 🔒</h3>
-            <p className="modal-body">
-              {lockedModal.prereqs.length > 0
-                ? `To unlock this category, you need to first complete ${
-                    lockedModal.prereqs.length === 1
-                      ? CATEGORY_LABELS[lockedModal.prereqs[0].category] || lockedModal.prereqs[0].category
-                      : lockedModal.prereqs.slice(0, -1).map(p => CATEGORY_LABELS[p.category] || p.category).join(', ') +
-                        ' and ' + (CATEGORY_LABELS[lockedModal.prereqs[lockedModal.prereqs.length - 1].category] || lockedModal.prereqs[lockedModal.prereqs.length - 1].category)
-                  }.`
-                : 'This category will unlock as you progress through your roadmap.'}
-            </p>
-            {lockedModal.prereqs.length > 0 && (
-              <ul className="modal-prereq-list">
-                {lockedModal.prereqs.map(p => (
-                  <li key={p.id} className="modal-prereq-item">
-                    <span className="modal-prereq-icon">{CATEGORY_ICONS[p.category] || '📌'}</span>
-                    <span className="modal-prereq-name">{CATEGORY_LABELS[p.category] || p.category}</span>
-                    <span className="modal-prereq-progress">{p.completed_steps}/{p.total_steps} done</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-            <button className="modal-close-btn" onClick={() => setLockedModal(null)}>Got it</button>
-          </div>
-        </div>
-      )}
-
       {/* Category Sidebar */}
       <div className={`chat-sidebar ${isSidebarCollapsed ? 'collapsed' : ''}`}>
         <div className="chat-header">
@@ -607,15 +688,7 @@ export default function Roadmap() {
               title={CATEGORY_LABELS[cat.category] || cat.category}
               className={`conversation-item roadmap-category-item ${selectedCategoryId === cat.id ? 'active' : ''} ${cat.status === 'locked' ? 'locked' : ''}`}
               onClick={() => {
-                if (cat.status === 'locked') {
-                  const depKeys = CATEGORY_DEPENDENCIES[cat.category] ?? [];
-                  const prereqs = depKeys
-                    .map(key => categories.find(c => c.category === key))
-                    .filter((c): c is RoadmapCategoryOverview => !!c && c.status !== 'completed');
-                  setLockedModal({ cat, prereqs });
-                } else {
-                  selectCategory(cat.id, cat.category);
-                }
+                selectCategory(cat.id, cat.category);
               }}
             >
               <div className="roadmap-category-row">
@@ -630,26 +703,24 @@ export default function Roadmap() {
                   <div className="conversation-title">{CATEGORY_LABELS[cat.category] || cat.category}</div>
                   <div className="roadmap-category-meta">
                     <span className="roadmap-category-status">
-                      {cat.status === 'locked' ? '🔒 Locked' : `${cat.completed_steps}/${cat.total_steps} steps`}
+                      {`${cat.completed_steps}/${cat.total_steps} steps`}
                     </span>
                   </div>
                 </div>
-                {cat.status !== 'locked' && (
-                  <div className="roadmap-category-progress-mini">
-                    <svg viewBox="0 0 36 36" className="roadmap-ring">
-                      <path
-                        className="roadmap-ring-bg"
-                        d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                      />
-                      <path
-                        className="roadmap-ring-fill"
-                        strokeDasharray={`${cat.progress_pct}, 100`}
-                        d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                        style={{ stroke: STATUS_COLORS[cat.status] || '#6b7280' }}
-                      />
-                    </svg>
-                  </div>
-                )}
+                <div className="roadmap-category-progress-mini">
+                  <svg viewBox="0 0 36 36" className="roadmap-ring">
+                    <path
+                      className="roadmap-ring-bg"
+                      d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                    />
+                    <path
+                      className="roadmap-ring-fill"
+                      strokeDasharray={`${cat.progress_pct}, 100`}
+                      d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                      style={{ stroke: STATUS_COLORS[cat.status] || '#6b7280' }}
+                    />
+                  </svg>
+                </div>
               </div>
             </div>
           ))}
@@ -764,9 +835,95 @@ export default function Roadmap() {
                 </div>
               </div>
 
-              {/* Acknowledge button for info steps */}
-              {currentStep.question_type === 'info' && currentStep.status !== 'completed' && (
+              {/* BSN Gate for Step 5 (post_registration_info) */}
+              {currentStep.question_type === 'info' && currentStep.question_key === 'post_registration_info' && currentStep.status !== 'completed' && (
+                <div className="step-options-inline" style={{ flexDirection: 'column' }}>
+                  {/* PDF download shortcut */}
+                  <button
+                    type="button"
+                    className="onboarding-option-btn"
+                    style={{ alignSelf: 'flex-start', marginBottom: '0.5rem', background: '#f0fdf4', color: '#15803d', border: '1px solid #86efac' }}
+                    onClick={() => window.print()}
+                  >
+                    🖨️ Download / Print this guide as PDF
+                  </button>
+                  {bsnGateMessage && (
+                    <div style={{ color: '#b45309', background: '#fffbeb', padding: '0.75rem', borderRadius: '0.5rem', marginBottom: '0.5rem', fontSize: '0.9rem' }}>
+                      {bsnGateMessage}
+                    </div>
+                  )}
+                  {!bsnPromptVisible && !bsnFrozen && (
+                    <button className="onboarding-option-btn" disabled style={{ opacity: 0.5, cursor: 'not-allowed' }}>
+                      {bsnCountdownSec !== null
+                        ? `⏳ Checking your appointment status${bsnCountdownSec > 60 ? ` — ${Math.ceil(bsnCountdownSec / 60)}m remaining` : ` — ${bsnCountdownSec}s`}`
+                        : '⏳ Waiting — confirm BSN when received...'}
+                    </button>
+                  )}
+                  {bsnPromptVisible && !bsnFrozen && (
+                    <>
+                      <p style={{ marginBottom: '0.5rem', fontWeight: 500 }}>Have you received your BSN?</p>
+                      <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                        <button
+                          className="onboarding-option-btn"
+                          onClick={() => { setBsnGateMessage(null); handleAnswerStep('bsn_received'); }}
+                          disabled={isSending}
+                        >
+                          ✅ Yes, I have my BSN
+                        </button>
+                        <button
+                          className="onboarding-option-btn"
+                          onClick={() => { setBsnGateMessage(null); handleAnswerStep('bsn_not_yet'); }}
+                          disabled={isSending}
+                        >
+                          ⏳ Not yet
+                        </button>
+                      </div>
+                    </>
+                  )}
+                  {bsnFrozen && (
+                    <div style={{ color: '#6b7280', fontStyle: 'italic', padding: '0.5rem' }}>
+                      🔒 You must have your BSN before continuing. Select &quot;Yes, I have my BSN&quot; once it arrives.
+                      <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                        <button
+                          className="onboarding-option-btn selected"
+                          onClick={() => { setBsnFrozen(false); setBsnGateMessage(null); handleAnswerStep('bsn_received'); }}
+                          disabled={isSending}
+                        >
+                          ✅ Yes, I have my BSN
+                        </button>
+                        <button className="onboarding-option-btn" disabled style={{ opacity: 0.5 }}>
+                          ⏳ Not yet
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Acknowledge button for all other info steps (except BSN gate and summary steps) */}
+              {currentStep.question_type === 'info' && currentStep.question_key !== 'post_registration_info' && !currentStep.metadata_?.is_summary && currentStep.status !== 'completed' && (
                 <div className="step-options-inline">
+                  <button
+                    className="onboarding-option-btn"
+                    onClick={() => handleAnswerStep('acknowledged')}
+                    disabled={isSending}
+                  >
+                    Got it, continue →
+                  </button>
+                </div>
+              )}
+
+              {/* Print + continue for health/housing summary steps */}
+              {currentStep.question_type === 'info' && currentStep.metadata_?.is_summary === true && currentStep.question_key !== 'post_registration_info' && currentStep.status !== 'completed' && (
+                <div className="step-options-inline" style={{ flexDirection: 'column', gap: '0.5rem' }}>
+                  <button
+                    type="button"
+                    className="onboarding-option-btn"
+                    style={{ alignSelf: 'flex-start', background: '#f0fdf4', color: '#15803d', border: '1px solid #86efac' }}
+                    onClick={() => window.print()}
+                  >
+                    🖨️ Download / Save as PDF
+                  </button>
                   <button
                     className="onboarding-option-btn"
                     onClick={() => handleAnswerStep('acknowledged')}
@@ -804,7 +961,52 @@ export default function Roadmap() {
                 </div>
               )}
 
-              {(currentStep.question_type === 'single_choice' || currentStep.question_type === 'multi_choice') && currentStep.options && (
+              {/* Checklist render for multi_choice steps with input_mode=checklist */}
+              {currentStep.question_type === 'multi_choice' && currentStep.metadata_?.input_mode === 'checklist' && currentStep.options && (
+                <div className="step-options-inline" style={{ flexDirection: 'column', gap: '0.5rem' }}>
+                  {currentStep.options.map((opt) => {
+                    const savedSet = checklistSelections[currentStep.id] || new Set();
+                    const isChecked = savedSet.has(opt.value);
+                    return (
+                      <label
+                        key={opt.value}
+                        style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer', padding: '0.5rem 0.75rem', borderRadius: '0.5rem', background: isChecked ? '#f0fdf4' : 'transparent', border: '1px solid', borderColor: isChecked ? '#86efac' : '#e5e7eb' }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => {
+                            setChecklistSelections(prev => {
+                              const existing = new Set(prev[currentStep.id] || []);
+                              if (existing.has(opt.value)) existing.delete(opt.value);
+                              else existing.add(opt.value);
+                              return { ...prev, [currentStep.id]: new Set(existing) };
+                            });
+                          }}
+                          disabled={isSending}
+                          style={{ width: '1rem', height: '1rem', accentColor: '#16a34a', flexShrink: 0 }}
+                        />
+                        {opt.label}
+                      </label>
+                    );
+                  })}
+                  <button
+                    className="onboarding-option-btn"
+                    onClick={() => {
+                      const selected = checklistSelections[currentStep.id];
+                      const answer = selected && selected.size > 0 ? Array.from(selected).join(',') : 'none';
+                      handleAnswerStep(answer);
+                    }}
+                    disabled={isSending}
+                    style={{ marginTop: '0.75rem' }}
+                  >
+                    {currentStep.status === 'completed' ? 'Update →' : 'Continue →'}
+                  </button>
+                </div>
+              )}
+
+              {/* Option buttons for single_choice and non-checklist multi_choice */}
+              {(currentStep.question_type === 'single_choice' || (currentStep.question_type === 'multi_choice' && currentStep.metadata_?.input_mode !== 'checklist')) && currentStep.options && (
                 <div className="step-options-inline">
                   {currentStep.options.map((opt) => {
                     const isSelected = (getSelectedAnswer(currentStep.id) || currentStep.answer) === opt.value;

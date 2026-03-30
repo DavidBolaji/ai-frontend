@@ -178,6 +178,37 @@ const ContentBlockItem: React.FC<{ block: ContentBlock; orderedStart?: number }>
         </div>
       );
 
+    case 'table': {
+      const headers = block.headers || [];
+      const rows = block.rows || [];
+      if (headers.length === 0) return null;
+      return (
+        <div className="content-block content-table-wrapper">
+          <table className="content-table">
+            <thead>
+              <tr>
+                {headers.map((h, i) => (
+                  <th key={i}>{renderInlineMarkdown(h)}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, ri) => (
+                <tr key={ri}>
+                  {row.map((cell, ci) => (
+                    <td key={ci}>{renderInlineMarkdown(cell)}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+    }
+
+    case 'hr':
+      return <hr className="content-divider" />;
+
     case 'source':
       // Source blocks are handled separately as tags
       return null;
