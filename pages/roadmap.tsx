@@ -639,10 +639,24 @@ export default function Roadmap() {
   }
 
   const currentStep = steps[currentStepIndex] || null;
-  const currentStepBlocks =
+  const rawStepBlocks: ContentBlock[] =
     (currentStep?.content_blocks && currentStep.content_blocks.length > 0
       ? currentStep.content_blocks
       : (currentStep?.metadata_?.content_blocks as ContentBlock[] | undefined)) || [];
+
+  // Strip the first block if it's a heading that duplicates the step's metadata title
+  // (prevents double-heading for static info steps whose content starts with ## title)
+  const currentStepBlocks: ContentBlock[] = (() => {
+    const metaTitle = currentStep?.metadata_?.title as string | undefined;
+    if (metaTitle && rawStepBlocks.length > 0) {
+      const titleText = metaTitle.replace(/^Step \d+:\s*/i, '').trim();
+      const first = rawStepBlocks[0] as any;
+      if (first.type === 'heading' && (first.content || '').trim() === titleText) {
+        return rawStepBlocks.slice(1);
+      }
+    }
+    return rawStepBlocks;
+  })();
 
   return (
     <div className="chat-container roadmap-page">
@@ -914,7 +928,7 @@ export default function Roadmap() {
               )}
 
               {/* Print + continue for health/housing summary steps */}
-              {currentStep.question_type === 'info' && currentStep.metadata_?.is_summary === true && currentStep.question_key !== 'post_registration_info' && currentStep.status !== 'completed' && (
+              {currentStep.question_type === 'info' && currentStep.metadata_?.is_summary === true && currentStep.question_key !== 'post_registration_info' && (
                 <div className="step-options-inline" style={{ flexDirection: 'column', gap: '0.5rem' }}>
                   <button
                     type="button"
@@ -924,13 +938,15 @@ export default function Roadmap() {
                   >
                     🖨️ Download / Save as PDF
                   </button>
-                  <button
-                    className="onboarding-option-btn"
-                    onClick={() => handleAnswerStep('acknowledged')}
-                    disabled={isSending}
-                  >
-                    Got it, continue →
-                  </button>
+                  {currentStep.status !== 'completed' && (
+                    <button
+                      className="onboarding-option-btn"
+                      onClick={() => handleAnswerStep('acknowledged')}
+                      disabled={isSending}
+                    >
+                      Got it, continue →
+                    </button>
+                  )}
                 </div>
               )}
 

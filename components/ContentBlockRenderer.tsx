@@ -9,14 +9,19 @@ export const ContentBlockRenderer: React.FC<ContentBlockRendererProps> = ({ bloc
   const normalizedBlocks = normalizeBlocks(blocks);
 
   let orderedCounter = 1;
+  let prevBlockWasOrdered = false;
   return (
     <>
       {normalizedBlocks.map((block, index) => {
         if (block.type === 'list' && block.ordered) {
+          // Reset counter when this ordered list is not directly consecutive with the previous one
+          if (!prevBlockWasOrdered) orderedCounter = 1;
           const start = orderedCounter;
           orderedCounter += block.items?.length || 0;
+          prevBlockWasOrdered = true;
           return <ContentBlockItem key={index} block={block} orderedStart={start} />;
         }
+        prevBlockWasOrdered = false;
         return <ContentBlockItem key={index} block={block} />;
       })}
     </>
@@ -26,8 +31,18 @@ export const ContentBlockRenderer: React.FC<ContentBlockRendererProps> = ({ bloc
 function normalizeBlocks(blocks: ContentBlock[]): ContentBlock[] {
   const normalized: ContentBlock[] = [];
 
-  for (const block of blocks) {
+  for (let i = 0; i < blocks.length; i++) {
+    const block = blocks[i];
     if (block.type !== 'list') {
+      // Suppress a text block when the very next block is a link with the same text
+      // (prevents duplicate rendering of lone URL lines like "**[url](url)**")
+      if (block.type === 'text') {
+        const next = blocks[i + 1];
+        const textContent = (block.content || '').replace(/\*+/g, '').trim();
+        if (next?.type === 'link' && textContent === (next.text || '').trim()) {
+          continue;
+        }
+      }
       normalized.push(block);
       continue;
     }
