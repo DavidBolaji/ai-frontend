@@ -1,8 +1,12 @@
-import { useState, useEffect, useRef, FormEvent } from 'react';
+import { useState, useEffect, useRef, useCallback, FormEvent } from 'react';
 import { useRouter } from 'next/router';
 import { apiClient } from '@/lib/api-client';
+import { useAskSocket } from '@/lib/use-ask-socket';
+import { useOnboardingSocket } from '@/lib/use-onboarding-socket';
 import { ContentBlockRenderer } from '@/components/ContentBlockRenderer';
 import { MessageSkeleton, ConversationSkeleton } from '@/components/Skeleton';
+import { NotificationToast } from '@/components/NotificationToast';
+import type { ToastNotification } from '@/components/NotificationToast';
 import type { 
   Conversation, 
   Message, 
@@ -21,6 +25,7 @@ interface DisplayMessage {
   sources?: string[];
   isStreaming?: boolean;
   isThinking?: boolean;
+  failed?: boolean;
 }
 
 const SOURCE_TAG_CACHE_KEY = 'sourceTagCacheByConversation';
@@ -40,6 +45,23 @@ function PaperPlaneIcon() {
       style={{ transform: 'rotate(45deg)', display: 'block', flexShrink: 0 }}
     >
       <path d="M498.1 5.6c10.1 7 15.4 19.1 13.5 31.2l-64 416c-1.5 9.7-7.4 18.2-16 23s-18.9 5.4-28 1.6L284 427.7l-68.5 74.1c-8.9 9.7-22.9 12.9-35.2 8.1S160 493.2 160 480V396.4c0-4 1.5-7.9 4.2-10.8L331.8 202.8c5.8-6.3 5.6-16-.4-22s-15.7-6.4-22-.7L106 360.8 17.7 316.6C7.1 311.3 .3 300.7 0 288.9s5.9-22.8 16.1-28.7l448-256c10.7-6.1 23.9-5.5 34 1.4z"/>
+    </svg>
+  );
+}
+
+function RetryIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polyline points="1 4 1 10 7 10" />
+      <path d="M3.51 15a9 9 0 1 0 .49-3.5" />
+    </svg>
+  );
+}
+
+function FeedbackIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
     </svg>
   );
 }
@@ -142,9 +164,51 @@ export default function Chat() {
   const [onboardingSubmitting, setOnboardingSubmitting] = useState(false);
   const [onboardingProgress, setOnboardingProgress] = useState<{ current: number; total: number }>({ current: 0, total: 0 });
   const [onboardingRestartPrompt, setOnboardingRestartPrompt] = useState(false);
-  const [roadmapCreating, setRoadmapCreating] = useState(false);
-  const [roadmapProgress, setRoadmapProgress] = useState<number>(0);
-  const [roadmapProgressMessage, setRoadmapProgressMessage] = useState<string>('Preparing your roadmap...');
+  const [onboardingRetryAnswers, setOnboardingRetryAnswers] = useState<Record<string, string> | null>(null);
+
+  // Push notification toast
+  const [activeToast, setActiveToast] = useState<ToastNotification | null>(null);
+  const dismissToast = useCallback(() => setActiveToast(null), []);
+
+  // WebSocket connection for real-time ask streaming
+  const {
+    state: socketState,
+    ask: socketAsk,
+    cancel: socketCancel,
+  } = useAskSocket({
+    getToken: () => apiClient.getAccessToken(),
+    onAuthError: () => {
+      apiClient.logout();
+    },
+    onNotification: (notification) => {
+      // Show toast for all notifications
+      setActiveToast({
+        id: notification.id,
+        title: notification.title,
+        body: notification.body,
+        action_url: notification.action_url,
+        category: notification.category,
+      });
+      // BSN reminder — also redirect to roadmap BSN step on "View"
+      if (notification.category === 'bsn_reminder' && notification.action_url) {
+        // Toast "View" button handles navigation; no auto-redirect here
+        return;
+      }
+    },
+  });
+
+  // WebSocket connection for onboarding flow
+  const {
+    getSession: wsGetOnboardingSession,
+    getNextQuestion: wsGetNextQuestion,
+    answerQuestion: wsAnswerQuestion,
+    getHistory: wsGetOnboardingHistory,
+    deleteSession: wsDeleteOnboardingSession,
+    completeStream: wsCompleteOnboardingStream,
+  } = useOnboardingSocket({
+    getToken: () => apiClient.getAccessToken(),
+    onAuthError: () => apiClient.logout(),
+  });
 
   // Initialize
   useEffect(() => {
@@ -356,6 +420,107 @@ export default function Chat() {
     };
     setMessages(prev => [...prev, tempUserMsg]);
 
+    // Use WebSocket streaming when connected in ask mode
+    if (socketState === 'ready' && mode === 'ask') {
+      const streamingId = `streaming-${Date.now()}`;
+      setMessages(prev => [
+        ...prev,
+        { id: streamingId, role: 'assistant', content: '', isStreaming: true },
+      ]);
+
+      let accumulated = '';
+
+      socketAsk(
+        {
+          message: userMessage,
+          conversation_id: currentConversationId || undefined,
+        },
+        {
+          onStatus(stage: string, message: string) {
+            setMessages(prev =>
+              prev.map(m =>
+                m.id === streamingId
+                  ? { ...m, content: message, isThinking: true, isStreaming: true }
+                  : m
+              )
+            );
+          },
+
+          onDelta(chunk: string) {
+            accumulated += chunk;
+            setMessages(prev =>
+              prev.map(m =>
+                m.id === streamingId
+                  ? { ...m, content: accumulated, isThinking: false, isStreaming: true }
+                  : m
+              )
+            );
+            messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+          },
+
+          onFinal(finalResponse: AskResponse) {
+            const sources = (() => {
+              const extracted = extractSources(finalResponse.attributes.content_blocks);
+              if (extracted.length > 0) return extracted;
+              const fromRag = extractSourcesFromRagSources(finalResponse.attributes.rag_sources);
+              if (fromRag.length > 0) return fromRag;
+              if (finalResponse.attributes.rag_used) return ['RAG'];
+              return [];
+            })();
+
+            const finalMsg: DisplayMessage = {
+              id: finalResponse.id,
+              role: 'assistant',
+              content: finalResponse.attributes.content,
+              content_blocks: finalResponse.attributes.content_blocks,
+              sources,
+              isStreaming: false,
+            };
+
+            setMessages(prev =>
+              prev.map(m => (m.id === streamingId ? finalMsg : m))
+            );
+
+            const cid = finalResponse.attributes.conversation_id;
+            if (sources.length > 0) {
+              persistSourceTags(cid, finalResponse.id, sources);
+            }
+
+            if (!currentConversationId) {
+              setCurrentConversationId(cid);
+              loadConversations(0);
+            }
+          },
+
+          onDone(status: string) {
+            if (status === 'cancelled') {
+              setMessages(prev =>
+                prev.map(m =>
+                  m.id === streamingId
+                    ? { ...m, isStreaming: false, isThinking: false }
+                    : m
+                )
+              );
+            }
+            setIsSending(false);
+          },
+
+          onError(detail: string) {
+            console.error('WebSocket ask error:', detail);
+            setMessages(prev =>
+              prev
+                .filter(m => m.id !== streamingId)
+                .map(m => m.id === tempUserMsg.id ? { ...m, failed: true } : m)
+            );
+            setSendError(detail);
+            setIsSending(false);
+          },
+        }
+      );
+      return;
+    }
+
+    // Fallback: HTTP POST (non-streaming) when WebSocket not connected
     const thinkingId = `thinking-${Date.now()}`;
     setMessages(prev => [
       ...prev,
@@ -405,13 +570,31 @@ export default function Chat() {
       setMessages(prev => prev.map(m => m.id === thinkingId ? assistantMsg : m));
     } catch (error) {
       console.error('Failed to send message:', error);
-      // Remove optimistic messages on error
-      setMessages(prev => prev.filter(m => m.id !== tempUserMsg.id && m.id !== thinkingId));
-      setInputMessage(userMessage);
+      setMessages(prev =>
+        prev
+          .filter(m => m.id !== thinkingId)
+          .map(m => m.id === tempUserMsg.id ? { ...m, failed: true } : m)
+      );
       setSendError(getErrorMessage(error));
     } finally {
       setIsSending(false);
     }
+  };
+
+  const handleRetry = (messageId: string, content: string) => {
+    // Remove the failed message and re-send its content
+    setMessages(prev => prev.filter(m => m.id !== messageId));
+    setSendError(null);
+    setInputMessage(content);
+    // Trigger send via a synthetic form submit on next tick
+    setTimeout(() => {
+      chatFormRef.current?.requestSubmit();
+    }, 0);
+  };
+
+  const handleFeedback = (messageId: string) => {
+    // Placeholder — wire up to your feedback API endpoint
+    console.info('[feedback] message_id=%s', messageId);
   };
 
   const handleLogout = () => {
@@ -444,7 +627,6 @@ export default function Chat() {
       setOnboardingAnswers({});
       onboardingAnswersRef.current = {};
       setOnboardingQuestion(null);
-      setRoadmapCreating(false);
       setOnboardingRestartPrompt(false);
       setMessages([]);
 
@@ -452,7 +634,7 @@ export default function Chat() {
       let initialAnswers: Record<string, string> = {};
       let sessionStatus: 'none' | 'in_progress' | 'closed' = 'none';
       try {
-        const sessionResp = await apiClient.getOnboardingSession();
+        const sessionResp = await wsGetOnboardingSession();
         initialAnswers = sessionResp.attributes.answers;
         sessionStatus = sessionResp.attributes.status;
       } catch { /* ignore — start fresh */ }
@@ -462,8 +644,8 @@ export default function Chat() {
         setOnboardingActive(false);
         try {
           const [historyResp, nextResp] = await Promise.all([
-            apiClient.getOnboardingHistory(initialAnswers),
-            apiClient.getNextOnboardingQuestion(initialAnswers),
+            wsGetOnboardingHistory(initialAnswers),
+            wsGetNextQuestion(initialAnswers),
           ]);
           const historyMessages: DisplayMessage[] = [];
           for (const item of historyResp.attributes.history) {
@@ -498,7 +680,7 @@ export default function Chat() {
           setMessages(historyMessages);
         } catch {
           // History fetch failed — clear session and start fresh silently
-          try { await apiClient.deleteOnboardingSession(); } catch { /* ignore */ }
+          try { await wsDeleteOnboardingSession(); } catch { /* ignore */ }
           setOnboardingRestartPrompt(false);
           setOnboardingActive(true);
           // fall through to the normal fresh-start flow below
@@ -518,10 +700,10 @@ export default function Chat() {
         // For resume: fetch history + next question in parallel
         const [historyResp, resp] = isResume
           ? await Promise.all([
-              apiClient.getOnboardingHistory(initialAnswers),
-              apiClient.getNextOnboardingQuestion(initialAnswers),
+              wsGetOnboardingHistory(initialAnswers),
+              wsGetNextQuestion(initialAnswers),
             ])
-          : [null, await apiClient.getNextOnboardingQuestion(initialAnswers)];
+          : [null, await wsGetNextQuestion(initialAnswers)];
 
         const q = resp.attributes.question;
         const progress = resp.attributes.progress;
@@ -584,42 +766,25 @@ export default function Chat() {
       setOnboardingAnswers({});
       onboardingAnswersRef.current = {};
       setOnboardingProgress({ current: 0, total: 0 });
-      setRoadmapCreating(false);
       setMessages([]);
       loadWelcomeMessage();
     }
   };
 
   const finishOnboarding = async (answers: Record<string, string>) => {
-    setRoadmapCreating(true);
-    setRoadmapProgress(0);
-    setRoadmapProgressMessage('Preparing your roadmap...');
     setOnboardingQuestion(null);
-
     try {
-      await apiClient.completeOnboardingStream(answers, {
-        onProgress: (pct, message) => {
-          setRoadmapProgress(pct);
-          setRoadmapProgressMessage(message);
-        },
-      });
-
-      // Backend automatically clears the onboarding session on roadmap creation.
-      // Keep showing the progress card and redirect immediately after completion.
-      setRoadmapProgress(100);
-      setRoadmapProgressMessage('Your roadmap is ready!');
-      setTimeout(() => {
-        router.push('/roadmap');
-      }, 250);
+      await wsCompleteOnboardingStream(answers);
+      router.push('/roadmap');
     } catch (error) {
       console.error('Failed to create roadmap:', error);
-      setRoadmapCreating(false);
       setMessages(prev => [...prev, {
         id: 'onboarding-error',
         role: 'assistant',
         content: 'Failed to create your roadmap. Please try again.',
         content_blocks: [{ type: 'text', content: 'Failed to create your roadmap. Please try again.' }],
       }]);
+      setOnboardingRetryAnswers(answers);
     }
   };
 
@@ -628,15 +793,14 @@ export default function Chat() {
     setOnboardingRestartPrompt(false);
     if (answer === 'yes') {
       // Clear the closed session so onboarding starts from the first question
-      try { await apiClient.deleteOnboardingSession(); } catch { /* ignore */ }
+      try { await wsDeleteOnboardingSession(); } catch { /* ignore */ }
       setOnboardingActive(true);
       setOnboardingAnswers({});
       onboardingAnswersRef.current = {};
       setOnboardingQuestion(null);
-      setRoadmapCreating(false);
       setMessages([]);
       try {
-        const resp = await apiClient.getNextOnboardingQuestion({});
+        const resp = await wsGetNextQuestion({});
         const q = resp.attributes.question;
         const progress = resp.attributes.progress;
         setOnboardingProgress({ current: progress.current_index + 1, total: progress.total_questions });
@@ -659,7 +823,6 @@ export default function Chat() {
       setOnboardingAnswers({});
       onboardingAnswersRef.current = {};
       setOnboardingProgress({ current: 0, total: 0 });
-      setRoadmapCreating(false);
       setMessages([]);
       loadWelcomeMessage();
     }
@@ -684,10 +847,9 @@ export default function Chat() {
     setOnboardingSubmitting(true);
 
     try {
-      // Use ref (always fresh) instead of stale closure state
       const currentAnswers = onboardingAnswersRef.current;
 
-      const resp = await apiClient.answerOnboardingQuestion(
+      const resp = await wsAnswerQuestion(
         questionKey,
         answer,
         currentAnswers,
@@ -715,7 +877,7 @@ export default function Chat() {
             content_blocks: nextQ.content_blocks || [{ type: 'text', content: nextQ.question }],
           }]);
           // Remove the saved session since the user is closing onboarding
-          try { await apiClient.deleteOnboardingSession(); } catch { /* ignore */ }
+          try { await wsDeleteOnboardingSession(); } catch { /* ignore */ }
           setOnboardingQuestion(null);
           setOnboardingActive(false);
           setOnboardingAnswers({});
@@ -741,10 +903,12 @@ export default function Chat() {
         }
       }
     } catch (error: any) {
-      // Handle validation errors from the backend
-      // Backend may return { errors: [{ detail }] } (normalized) or 
-      // { type: "onboarding-validation-error", attributes: { error } } (raw 422)
+      // WS hook rejects with a plain Error; the message contains the backend detail.
+      // Also handle legacy JSON:API shapes for compatibility.
       const validationError =
+        (error instanceof Error && error.message && error.message !== 'Unprocessable Entity'
+          ? error.message
+          : null) ||
         error?.errors?.[0]?.detail ||
         error?.attributes?.error ||
         (error?.type === 'onboarding-validation-error' && error?.attributes?.error);
@@ -784,6 +948,11 @@ export default function Chat() {
 
   return (
     <div className="chat-container">
+      <NotificationToast
+        notification={activeToast}
+        onDismiss={dismissToast}
+        onAction={(url) => router.push(url)}
+      />
       {isMobileSidebarOpen && (
         <div
           className="mobile-sidebar-backdrop"
@@ -871,12 +1040,17 @@ export default function Chat() {
             </>
           ) : (
             messages.map((message) => (
-              <div key={message.id} className={`message ${message.role}`}>
+              <div key={message.id} className={`message ${message.role}${message.failed ? ' failed' : ''}`}>
                 <div className="message-content">
                   {message.isThinking ? (
-                    <span className="thinking-dots" aria-label="Thinking">
-                      <span /><span /><span />
-                    </span>
+                    <div className="thinking-status">
+                      {message.content && (
+                        <span className="thinking-label">{message.content}</span>
+                      )}
+                      <span className="thinking-dots" aria-label="Thinking">
+                        <span /><span /><span />
+                      </span>
+                    </div>
                   ) : message.content_blocks ? (
                     <ContentBlockRenderer blocks={message.content_blocks} />
                   ) : (
@@ -897,23 +1071,28 @@ export default function Chat() {
                     ))}
                   </div>
                 )}
+                {message.role === 'user' && !message.isThinking && (
+                  <div className="message-actions">
+                    <button
+                      className={`message-action-btn${message.failed ? ' retry-highlight' : ''}`}
+                      onClick={() => handleRetry(message.id, message.content)}
+                      title="Retry"
+                      aria-label="Retry message"
+                    >
+                      <RetryIcon />
+                    </button>
+                    <button
+                      className="message-action-btn"
+                      onClick={() => handleFeedback(message.id)}
+                      title="Feedback"
+                      aria-label="Send feedback"
+                    >
+                      <FeedbackIcon />
+                    </button>
+                  </div>
+                )}
               </div>
             ))
-          )}
-
-          {/* Roadmap creation progress card */}
-          {roadmapCreating && (
-            <div className="roadmap-creating-card">
-
-              <div className="roadmap-creating-subtitle">{roadmapProgressMessage}</div>
-              <div className="roadmap-creating-bar-container">
-                <div
-                  className="roadmap-creating-bar"
-                  style={{ width: `${roadmapProgress}%` }}
-                />
-              </div>
-              <div className="roadmap-creating-pct">{roadmapProgress}%</div>
-            </div>
           )}
 
           {/* Restart prompt buttons — shown when session was previously closed */}
@@ -926,8 +1105,21 @@ export default function Chat() {
             </div>
           )}
 
+          {/* Retry button — shown when roadmap creation failed */}
+          {onboardingRetryAnswers && (
+            <div className="onboarding-options-wrap">
+              <div className="onboarding-options">
+                <button className="onboarding-option-btn" onClick={() => {
+                  const answers = onboardingRetryAnswers;
+                  setOnboardingRetryAnswers(null);
+                  finishOnboarding(answers);
+                }}>Try again</button>
+              </div>
+            </div>
+          )}
+
           {/* Onboarding option buttons — directly under the question */}
-          {onboardingActive && !roadmapCreating && onboardingQuestion && (() => {
+          {onboardingActive && onboardingQuestion && (() => {
             if (onboardingQuestion.type === 'yes_no') {
               return (
                 <div className="onboarding-options-wrap">
@@ -955,7 +1147,7 @@ export default function Chat() {
           })()}
 
           {/* Onboarding progress indicator */}
-          {onboardingActive && !roadmapCreating && onboardingProgress.total > 0 && (
+          {onboardingActive && onboardingProgress.total > 0 && (
             <div className="onboarding-progress">
               <span>Question {onboardingProgress.current} of {onboardingProgress.total}</span>
             </div>
@@ -1019,6 +1211,15 @@ export default function Chat() {
               <span className="btn-send-icon"><PaperPlaneIcon /></span>
               <span className="btn-send-label">{isSending || onboardingSubmitting ? 'Sending...' : 'Send'}</span>
             </button>
+            {isSending && socketState === 'asking' && (
+              <button
+                type="button"
+                className="btn-cancel"
+                onClick={socketCancel}
+              >
+                Stop
+              </button>
+            )}
           </form>
         </div>
       </div>

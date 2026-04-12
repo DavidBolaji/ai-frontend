@@ -362,7 +362,7 @@ textarea {
 }
 
 .message.assistant {
-  max-width: 100%;
+  max-width: 620px;
 }
 
 @keyframes fadeIn {
@@ -402,6 +402,18 @@ textarea {
   background: #f3f4f6;
   color: #1a1a1a;
   border-bottom-left-radius: 4px;
+}
+
+.thinking-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.thinking-label {
+  font-size: 0.875rem;
+  color: #6b7280;
+  font-style: italic;
 }
 
 .thinking-dots {
@@ -470,6 +482,55 @@ textarea {
   border-radius: 12px;
   font-size: 0.75rem;
   font-weight: 500;
+}
+
+/* Message action buttons (retry + feedback) on user messages */
+.message.user .message-actions {
+  display: flex;
+  gap: 0.3rem;
+  justify-content: flex-end;
+  margin-top: 0.35rem;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.message.user:hover .message-actions,
+.message.user.failed .message-actions {
+  opacity: 1;
+}
+
+.message-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.65);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+  padding: 0;
+}
+
+.message-action-btn:hover {
+  background: rgba(255, 255, 255, 0.22);
+  color: white;
+}
+
+.message-action-btn.retry-highlight {
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.15);
+}
+
+.message-action-btn.retry-highlight:hover {
+  background: rgba(251, 191, 36, 0.25);
+  color: #f59e0b;
+}
+
+.message.user.failed .message-content {
+  outline: 1px solid rgba(251, 191, 36, 0.4);
 }
 
 .chat-input-container {
@@ -654,12 +715,19 @@ textarea {
 }
 
 .content-link {
-  color: #1f2937;
+  color: #2563eb;
   text-decoration: underline;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 2px;
   overflow-wrap: break-word;
   word-break: break-word;
-  display: inline-block;
+  display: inline;
   max-width: 100%;
+  transition: color 0.15s ease;
+}
+
+.content-link:hover {
+  color: #1d4ed8;
 }
 
 /* Table */

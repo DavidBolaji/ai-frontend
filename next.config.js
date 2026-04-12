@@ -9,6 +9,11 @@ const nextConfig = {
     }
 
     return [
+      // WebSocket endpoint — must come before the catch-all
+      {
+        source: '/api/ws/:path*',
+        destination: `${backendBaseUrl}/ws/:path*`,
+      },
       {
         source: '/api/proxy/:path*',
         destination: `${backendBaseUrl}/:path*`,

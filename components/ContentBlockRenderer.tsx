@@ -9,19 +9,25 @@ export const ContentBlockRenderer: React.FC<ContentBlockRendererProps> = ({ bloc
   const normalizedBlocks = normalizeBlocks(blocks);
 
   let orderedCounter = 1;
-  let prevBlockWasOrdered = false;
+  // Track whether the ordered counter should carry over to the next
+  // ordered list.  A bullet list between two ordered lists should NOT
+  // reset the counter (e.g. "1. Step\n  - sub\n2. Step" pattern).
+  // Only a non-list block (heading, text, hr…) resets it.
+  let orderedGroupActive = false;
   return (
     <>
       {normalizedBlocks.map((block, index) => {
         if (block.type === 'list' && block.ordered) {
-          // Reset counter when this ordered list is not directly consecutive with the previous one
-          if (!prevBlockWasOrdered) orderedCounter = 1;
+          if (!orderedGroupActive) orderedCounter = 1;
           const start = orderedCounter;
           orderedCounter += block.items?.length || 0;
-          prevBlockWasOrdered = true;
+          orderedGroupActive = true;
           return <ContentBlockItem key={index} block={block} orderedStart={start} />;
         }
-        prevBlockWasOrdered = false;
+        // Bullet lists keep the group alive; any other block type closes it.
+        if (block.type !== 'list') {
+          orderedGroupActive = false;
+        }
         return <ContentBlockItem key={index} block={block} />;
       })}
     </>
@@ -68,13 +74,42 @@ function normalizeBlocks(blocks: ContentBlock[]): ContentBlock[] {
   return normalized;
 }
 
+/**
+ * Derive a human-readable label from a bare URL.
+ * e.g. "https://www.amsterdam.nl/en/civil-affairs/first-registration"
+ *    → "Amsterdam – Civil Affairs · First Registration"
+ */
+function descriptiveLinkText(url: string): string {
+  try {
+    const parsed = new URL(url);
+    let host = parsed.hostname;
+    if (host.startsWith('www.')) host = host.slice(4);
+    const domainLabel = host.split('.')[0].replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+
+    const path = parsed.pathname.replace(/^\/|\/$/g, '');
+    if (path) {
+      const skip = new Set(['en', 'nl', 'index', 'index.html']);
+      const segments = path.split('/').filter(s => s && !skip.has(s.toLowerCase()));
+      if (segments.length > 0) {
+        const labels = segments.slice(-2).map(s =>
+          s.replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+        );
+        return `${domainLabel} – ${labels.join(' · ')}`;
+      }
+    }
+    return domainLabel || url;
+  } catch {
+    return url;
+  }
+}
+
 function renderInlineMarkdown(text?: string): React.ReactNode {
   if (!text) {
     return null;
   }
 
   const nodes: React.ReactNode[] = [];
-  const pattern = /\(\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)\)|\*\*([^*]+)\*\*|\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g;
+  const pattern = /\(\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)\)|\*\*([^*]+)\*\*|\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)|(https?:\/\/[^\s)]+)/g;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
 
@@ -111,6 +146,20 @@ function renderInlineMarkdown(text?: string): React.ReactNode {
           className="content-link"
         >
           {match[4]}
+        </a>
+      );
+    } else if (match[6]) {
+      // Bare URL — derive a descriptive label
+      const bareUrl = match[6].replace(/[.,;:!?]+$/, '');
+      nodes.push(
+        <a
+          key={`bare-link-${match.index}`}
+          href={bareUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="content-link"
+        >
+          {descriptiveLinkText(bareUrl)}
         </a>
       );
     }

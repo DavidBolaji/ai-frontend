@@ -1,8 +1,11 @@
-import { useState, useEffect, useRef, FormEvent } from 'react';
+import { useState, useEffect, useRef, useCallback, FormEvent } from 'react';
 import { useRouter } from 'next/router';
 import { apiClient } from '@/lib/api-client';
+import { useRoadmapSocket } from '@/lib/use-roadmap-socket';
 import { ContentBlockRenderer } from '@/components/ContentBlockRenderer';
 import { MessageSkeleton } from '@/components/Skeleton';
+import { NotificationToast } from '@/components/NotificationToast';
+import type { ToastNotification } from '@/components/NotificationToast';
 import type {
   RoadmapCategoryOverview,
   RoadmapStepDetail,
@@ -89,6 +92,44 @@ export default function Roadmap() {
   // Auth
   const [user, setUser] = useState<any>(null);
 
+  // Stable ref so the WS notification handler (wired before state is declared) can
+  // call setBsnPromptVisible.  Updated synchronously after state is declared below.
+  const setBsnPromptVisibleRef = useRef<(v: boolean) => void>(() => {});
+
+  // WebSocket for roadmap operations
+  const {
+    state: roadmapSocketState,
+    getRoadmap: wsGetRoadmap,
+    getCategory: wsGetCategory,
+    answerStep: wsAnswerStep,
+    getStepChat: wsGetStepChat,
+  } = useRoadmapSocket({
+    getToken: () => apiClient.getAccessToken(),
+    onAuthError: () => apiClient.logout(),
+    onNotification: (notification) => {
+      // Always show the toast for every incoming push notification
+      showToastRef.current({
+        id: notification.id,
+        title: notification.title,
+        body: notification.body,
+        action_url: notification.action_url,
+        category: notification.category,
+      });
+
+      if (notification.category === 'bsn_reminder') {
+        // Show BSN prompt immediately — backend decided the delay has elapsed
+        setBsnPromptVisibleRef.current(true);
+        if (notification.action_url) {
+          const url = new URL(notification.action_url, window.location.origin);
+          const catId = url.searchParams.get('category_id');
+          if (catId) {
+            selectCategory(catId, 'municipality');
+          }
+        }
+      }
+    },
+  });
+
   // Roadmap data
   const [categories, setCategories] = useState<RoadmapCategoryOverview[]>([]);
   const [overallProgress, setOverallProgress] = useState(0);
@@ -133,13 +174,18 @@ export default function Roadmap() {
   // Checklist selections (step id → set of selected values)
   const [checklistSelections, setChecklistSelections] = useState<Record<string, Set<string>>>({});
 
+  // Push notification toast
+  const [activeToast, setActiveToast] = useState<ToastNotification | null>(null);
+  const dismissToast = useCallback(() => setActiveToast(null), []);
+  const showToastRef = useRef<(n: ToastNotification) => void>(() => {});
+  showToastRef.current = setActiveToast;
+
   // BSN gate state (municipality Step 5 only)
   const [bsnPromptVisible, setBsnPromptVisible] = useState(false);
   const [bsnFrozen, setBsnFrozen] = useState(false);
   const [bsnGateMessage, setBsnGateMessage] = useState<string | null>(null);
-  const [bsnCountdownSec, setBsnCountdownSec] = useState<number | null>(null);
-  const bsnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const bsnCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Keep the ref in sync so the notification handler always calls the latest setter
+  setBsnPromptVisibleRef.current = setBsnPromptVisible;
 
   // Category completed banner
   const [categoryCompletedBanner, setCategoryCompletedBanner] = useState<{
@@ -147,18 +193,35 @@ export default function Roadmap() {
     icon: string;
   } | null>(null);
 
-  // Initialize
+  // Initialize — auth check only; roadmap loads once WS is ready
   useEffect(() => {
     if (!apiClient.isAuthenticated()) {
       router.replace('/login');
       return;
     }
-
     const userData = apiClient.getUser();
     setUser(userData);
-
-    loadRoadmap();
   }, [router]);
+
+  // Load roadmap once the WebSocket is authenticated
+  const roadmapLoadedRef = useRef(false);
+  useEffect(() => {
+    if (roadmapSocketState === 'ready' && user && !roadmapLoadedRef.current) {
+      roadmapLoadedRef.current = true;
+      loadRoadmap();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roadmapSocketState, user]);
+
+  // Handle BSN deep-link from push notification (?bsn_step=1&category_id=xxx)
+  useEffect(() => {
+    if (!router.isReady || roadmapSocketState !== 'ready') return;
+    const catId = router.query.category_id as string | undefined;
+    if (router.query.bsn_step === '1' && catId) {
+      selectCategory(catId, 'municipality');
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router.isReady, router.query, roadmapSocketState]);
 
   // Auto-scroll chat
   useEffect(() => {
@@ -187,67 +250,27 @@ export default function Roadmap() {
 
     // Reset BSN gate UI when navigating off step 5
     if (step.question_key !== 'post_registration_info') {
-      if (bsnTimerRef.current) clearTimeout(bsnTimerRef.current);
-      if (bsnCountdownRef.current) clearInterval(bsnCountdownRef.current);
       setBsnPromptVisible(false);
       setBsnFrozen(false);
       setBsnGateMessage(null);
-      setBsnCountdownSec(null);
     }
   }, [currentStepIndex, steps]);
 
-  // BSN timer: driven by server-side first_viewed_at — survives page refresh / re-navigation
+  // BSN gate: on reconnect / page refresh, server may have already set bsn_gate_ready
   useEffect(() => {
-    if (bsnTimerRef.current) clearTimeout(bsnTimerRef.current);
-    if (bsnCountdownRef.current) clearInterval(bsnCountdownRef.current);
-
     const step = steps[currentStepIndex];
     if (!step || step.question_key !== 'post_registration_info') return;
     if (step.answer === 'bsn_received') return;
 
     const meta = step.metadata_ as any;
-    // Server already confirmed the delay has elapsed
     if (meta?.bsn_gate_ready) {
       setBsnPromptVisible(true);
-      setBsnCountdownSec(null);
-      return;
     }
-    // Compute remaining time from absolute server timestamp
-    if (meta?.bsn_gate_opens_at) {
-      const opensAt = new Date(meta.bsn_gate_opens_at).getTime();
-      const remaining = opensAt - Date.now();
-      if (remaining <= 0) {
-        setBsnPromptVisible(true);
-        setBsnCountdownSec(null);
-      } else {
-        setBsnCountdownSec(Math.ceil(remaining / 1000));
-        bsnCountdownRef.current = setInterval(() => {
-          const left = Math.ceil((opensAt - Date.now()) / 1000);
-          if (left <= 0) {
-            if (bsnCountdownRef.current) clearInterval(bsnCountdownRef.current);
-            setBsnCountdownSec(null);
-            setBsnPromptVisible(true);
-          } else {
-            setBsnCountdownSec(left);
-          }
-        }, 1000);
-        bsnTimerRef.current = setTimeout(() => {
-          if (bsnCountdownRef.current) clearInterval(bsnCountdownRef.current);
-          setBsnCountdownSec(null);
-          setBsnPromptVisible(true);
-        }, remaining);
-      }
-    }
-
-    return () => {
-      if (bsnTimerRef.current) clearTimeout(bsnTimerRef.current);
-      if (bsnCountdownRef.current) clearInterval(bsnCountdownRef.current);
-    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentStepIndex, steps]);
 
   const reloadCategoriesData = async (): Promise<RoadmapCategoryOverview[]> => {
-    const roadmap = await apiClient.getRoadmap();
+    const roadmap = await wsGetRoadmap();
     const cats = sortCategoriesStable(roadmap.attributes.categories);
     setCategories(cats);
     setOverallProgress(roadmap.attributes.overall_progress_pct);
@@ -279,8 +302,7 @@ export default function Roadmap() {
     // Claim this load generation — any earlier in-flight calls become stale.
     const gen = ++categoryLoadGenRef.current;
 
-    // Clear BSN timer and gate state when switching categories
-    if (bsnTimerRef.current) clearTimeout(bsnTimerRef.current);
+    // Reset BSN gate state when switching categories
     setBsnPromptVisible(false);
     setBsnFrozen(false);
     setBsnGateMessage(null);
@@ -292,7 +314,7 @@ export default function Roadmap() {
     setCurrentStepIndex(0);
 
     try {
-      const detail = await apiClient.getCategoryDetail(categoryId);
+      const detail = await wsGetCategory(categoryId);
 
       // Discard if a newer selectCategory call has already started.
       if (gen !== categoryLoadGenRef.current) return;
@@ -324,8 +346,8 @@ export default function Roadmap() {
   const loadStepChat = async (stepId: string) => {
     setChatLoading(true);
     try {
-      const history = await apiClient.getStepChatHistory(stepId);
-      const msgs: StepChatMessage[] = history.attributes.messages.map(m => ({
+      const history = await wsGetStepChat(stepId);
+      const msgs: StepChatMessage[] = history.attributes.messages.map((m: any) => ({
         id: m.id,
         role: m.role,
         content: m.content,
@@ -447,7 +469,7 @@ export default function Roadmap() {
     setSubmitError(null);
     setIsSending(true);
     try {
-      const resp = await apiClient.answerStep(step.id, answer);
+      const resp = await wsAnswerStep(step.id, answer);
       const { completed_step, next_step, new_steps_added, reset_steps, deleted_step_ids, category_progress_pct, category_completed_steps, category_completed, routed_to_chat, chat_response, validation_error, gate_blocked, gate_message } = resp.attributes;
 
       // BSN gate: blocked answer — show gate message inline, stay on step
@@ -642,7 +664,7 @@ export default function Roadmap() {
   const rawStepBlocks: ContentBlock[] =
     (currentStep?.content_blocks && currentStep.content_blocks.length > 0
       ? currentStep.content_blocks
-      : (currentStep?.metadata_?.content_blocks as ContentBlock[] | undefined)) || [];
+      : []);
 
   // Strip the first block if it's a heading that duplicates the step's metadata title
   // (prevents double-heading for static info steps whose content starts with ## title)
@@ -660,6 +682,11 @@ export default function Roadmap() {
 
   return (
     <div className="chat-container roadmap-page">
+      <NotificationToast
+        notification={activeToast}
+        onDismiss={dismissToast}
+        onAction={(url) => router.push(url)}
+      />
       {/* Category Sidebar */}
       <div className={`chat-sidebar ${isSidebarCollapsed ? 'collapsed' : ''}`}>
         <div className="chat-header">
@@ -815,34 +842,20 @@ export default function Roadmap() {
                   {currentStep.metadata_?.title ? (
                     <h3 className="step-title">{currentStep.metadata_.title}</h3>
                   ) : null}
-                  {currentStep.metadata_?.content ? (
-                    <div
-                      className="step-content-text"
-                      style={
-                        currentStepBlocks.length > 0
-                          ? { marginTop: '0.5rem' }
-                          : { whiteSpace: 'pre-line', marginTop: '0.5rem' }
-                      }
-                    >
-                      {currentStepBlocks.length > 0 ? (
-                        <ContentBlockRenderer blocks={currentStepBlocks} />
-                      ) : (
-                        currentStep.metadata_.content
-                      )}
-                    </div>
-                  ) : (
-                    <div className="step-question-text" style={
+                  <div
+                    className="step-content-text"
+                    style={
                       currentStepBlocks.length > 0
                         ? { marginTop: '0.5rem' }
                         : { whiteSpace: 'pre-line', marginTop: '0.5rem' }
-                    }>
-                      {currentStepBlocks.length > 0 ? (
-                        <ContentBlockRenderer blocks={currentStepBlocks} />
-                      ) : (
-                        currentStep.question_text
-                      )}
-                    </div>
-                  )}
+                    }
+                  >
+                    {currentStepBlocks.length > 0 ? (
+                      <ContentBlockRenderer blocks={currentStepBlocks} />
+                    ) : (
+                      currentStep.question_text
+                    )}
+                  </div>
                   {currentStep.metadata_ && currentStep.metadata_.help && (
                     <div className="step-help-text">{currentStep.metadata_.help}</div>
                   )}
@@ -868,9 +881,7 @@ export default function Roadmap() {
                   )}
                   {!bsnPromptVisible && !bsnFrozen && (
                     <button className="onboarding-option-btn" disabled style={{ opacity: 0.5, cursor: 'not-allowed' }}>
-                      {bsnCountdownSec !== null
-                        ? `⏳ Checking your appointment status${bsnCountdownSec > 60 ? ` — ${Math.ceil(bsnCountdownSec / 60)}m remaining` : ` — ${bsnCountdownSec}s`}`
-                        : '⏳ Waiting — confirm BSN when received...'}
+                      ⏳ Waiting — confirm BSN when received...
                     </button>
                   )}
                   {bsnPromptVisible && !bsnFrozen && (
@@ -961,16 +972,16 @@ export default function Roadmap() {
               {/* Option buttons — always visible, toggle selection */}
               {currentStep.question_type === 'yes_no' && (
                 <div className="step-options-inline">
-                  {['yes', 'no'].map((val) => {
-                    const isSelected = (getSelectedAnswer(currentStep.id) || currentStep.answer) === val;
+                  {(currentStep.options || [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }]).map((opt) => {
+                    const isSelected = (getSelectedAnswer(currentStep.id) || currentStep.answer) === opt.value;
                     return (
                       <button
-                        key={val}
+                        key={opt.value}
                         className={`onboarding-option-btn${isSelected ? ' selected' : ''}`}
-                        onClick={() => selectOption(currentStep.id, val)}
+                        onClick={() => selectOption(currentStep.id, opt.value)}
                         disabled={isSending}
                       >
-                        {val === 'yes' ? 'Yes' : 'No'}
+                        {opt.label}
                       </button>
                     );
                   })}

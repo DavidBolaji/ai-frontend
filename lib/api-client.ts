@@ -11,6 +11,7 @@ import type {
   JsonApiDocument,
   JsonApiErrorDocument,
   JsonApiErrorItem,
+  JsonApiRequestDocument,
   OnboardingQuestionsResponse,
   OnboardingAnswers,
   OnboardingNextResponse,
@@ -67,8 +68,8 @@ class ApiClient {
     try {
       const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refreshToken: this.refreshToken }),
+        headers: { 'Content-Type': 'application/vnd.api+json' },
+        body: this.wrapBody('refresh', { refreshToken: this.refreshToken }),
       });
 
       if (!response.ok) {
@@ -96,6 +97,21 @@ class ApiClient {
       return (payload as JsonApiDocument<T>).data;
     }
     return payload as T;
+  }
+
+  /**
+   * Wrap a flat payload in a JSON:API 1.1 request document.
+   *
+   *   { data: { type: resourceType, attributes: payload } }
+   */
+  private wrapBody<P extends Record<string, unknown>>(
+    resourceType: string,
+    payload: P,
+  ): string {
+    const doc: JsonApiRequestDocument<P> = {
+      data: { type: resourceType, attributes: payload },
+    };
+    return JSON.stringify(doc);
   }
 
   private normalizeError(payload: unknown, status: number, statusText: string): ApiError {
@@ -161,6 +177,10 @@ class ApiClient {
     return !!this.accessToken;
   }
 
+  public getAccessToken(): string | null {
+    return this.accessToken;
+  }
+
   public getUser(): any {
     if (typeof window !== 'undefined') {
       const userStr = localStorage.getItem('user');
@@ -175,7 +195,7 @@ class ApiClient {
     retry = true
   ): Promise<T> {
     const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
+      'Content-Type': 'application/vnd.api+json',
       ...(options.headers as Record<string, string>),
     };
 
@@ -253,7 +273,7 @@ class ApiClient {
     retry = true
   ): Promise<T> {
     const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
+      'Content-Type': 'application/vnd.api+json',
       Accept: 'text/event-stream',
     };
 
@@ -403,7 +423,7 @@ class ApiClient {
   async register(payload: RegisterPayload): Promise<AuthSession> {
     const data = await this.request<AuthSession>('/auth/register', {
       method: 'POST',
-      body: JSON.stringify(payload),
+      body: this.wrapBody('register', payload),
     });
 
     this.setTokens(
@@ -421,7 +441,7 @@ class ApiClient {
   async login(payload: LoginPayload): Promise<AuthSession> {
     const data = await this.request<AuthSession>('/auth/login', {
       method: 'POST',
-      body: JSON.stringify(payload),
+      body: this.wrapBody('login', payload),
     });
 
     this.setTokens(
@@ -444,7 +464,7 @@ class ApiClient {
   async ask(payload: AskPayload): Promise<AskResponse> {
     return this.request<AskResponse>('/ask', {
       method: 'POST',
-      body: JSON.stringify(payload),
+      body: this.wrapBody('ask', payload),
     });
   }
 
@@ -456,7 +476,8 @@ class ApiClient {
       onDone?: () => void;
     } = {}
   ): Promise<AskResponse> {
-    return this.streamRequest<AskResponse>('/ask/stream', payload, handlers);
+    const wrapped = { data: { type: 'ask', attributes: payload } };
+    return this.streamRequest<AskResponse>('/ask/stream', wrapped, handlers);
   }
 
   async getConversations(skip = 0, limit = 20): Promise<ConversationListResponse> {
@@ -487,7 +508,7 @@ class ApiClient {
   async submitOnboarding(answers: OnboardingAnswers): Promise<RoadmapOverview> {
     return this.request<RoadmapOverview>('/roadmap/onboarding', {
       method: 'POST',
-      body: JSON.stringify({ answers }),
+      body: this.wrapBody('onboarding', { answers }),
     });
   }
 
@@ -504,7 +525,7 @@ class ApiClient {
     const encoded = encodeURIComponent(JSON.stringify(answers));
     return this.request<OnboardingNextResponse>(`/roadmap/onboarding/answer?answers=${encoded}`, {
       method: 'POST',
-      body: JSON.stringify({ question_key: questionKey, answer }),
+      body: this.wrapBody('onboarding-answer', { question_key: questionKey, answer }),
     });
   }
 
@@ -530,7 +551,7 @@ class ApiClient {
   async completeOnboarding(answers: Record<string, string>): Promise<RoadmapOverview> {
     return this.request<RoadmapOverview>('/roadmap/onboarding/complete', {
       method: 'POST',
-      body: JSON.stringify({ answers }),
+      body: this.wrapBody('onboarding-complete', { answers }),
     });
   }
 
@@ -542,9 +563,10 @@ class ApiClient {
       onDone?: () => void;
     } = {}
   ): Promise<RoadmapOverview> {
+    const wrapped = { data: { type: 'onboarding-complete', attributes: { answers } } };
     return this.streamRequest<RoadmapOverview>(
       '/roadmap/onboarding/complete/stream',
-      { answers },
+      wrapped,
       handlers,
     );
   }
@@ -556,14 +578,14 @@ class ApiClient {
   async answerStep(stepId: string, answer: string, answerData?: Record<string, any>): Promise<AnswerStepResponse> {
     return this.request<AnswerStepResponse>(`/roadmap/steps/${stepId}/answer`, {
       method: 'POST',
-      body: JSON.stringify({ answer, answer_data: answerData ?? null }),
+      body: this.wrapBody('step-answer', { answer, answer_data: answerData ?? null }),
     });
   }
 
   async stepChat(stepId: string, message: string): Promise<StepChatResponse> {
     return this.request<StepChatResponse>(`/roadmap/steps/${stepId}/chat`, {
       method: 'POST',
-      body: JSON.stringify({ message }),
+      body: this.wrapBody('step-chat', { message }),
     });
   }
 

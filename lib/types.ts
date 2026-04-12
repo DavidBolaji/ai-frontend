@@ -170,6 +170,15 @@ export interface JsonApiErrorDocument {
   errors: JsonApiErrorItem[];
 }
 
+// --- JSON:API 1.1 request envelope ---
+
+export interface JsonApiRequestDocument<T = Record<string, unknown>> {
+  data: {
+    type: string;
+    attributes: T;
+  };
+}
+
 // --- Roadmap types ---
 
 export interface StepOption {
