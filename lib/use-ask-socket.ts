@@ -66,8 +66,9 @@ export function useAskSocket(options: AskSocketOptions) {
 
     setState('connecting');
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${protocol}//${window.location.host}/api/ws/ask`);
+    const wsBase = process.env.NEXT_PUBLIC_API_WS_URL ||
+      `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/ws`;
+    const ws = new WebSocket(`${wsBase}/ask`);
     wsRef.current = ws;
 
     ws.onopen = () => {

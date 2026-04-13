@@ -96,8 +96,9 @@ export function useRoadmapSocket(options: RoadmapSocketOptions) {
 
     setState('connecting');
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${protocol}//${window.location.host}/api/ws/roadmap`);
+    const wsBase = process.env.NEXT_PUBLIC_API_WS_URL ||
+      `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/ws`;
+    const ws = new WebSocket(`${wsBase}/roadmap`);
     wsRef.current = ws;
 
     ws.onopen = () => {
