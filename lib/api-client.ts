@@ -104,7 +104,7 @@ class ApiClient {
    *
    *   { data: { type: resourceType, attributes: payload } }
    */
-  private wrapBody<P extends Record<string, unknown>>(
+  private wrapBody<P extends object>(
     resourceType: string,
     payload: P,
   ): string {
