@@ -53,6 +53,7 @@ export interface AskPayload {
   message: string;
   conversation_id?: string;
   max_new_tokens?: number;
+  document_id?: string;
 }
 
 export interface AskResponse {
@@ -95,14 +96,19 @@ export interface Conversation {
 }
 
 export interface ConversationListResponse {
-  type: 'conversation-list';
-  id: string;
-  attributes: {
-    total: number;
-    skip: number;
-    limit: number;
-    items: Conversation[];
+  links: {
+    self: string;
+    first: string;
+    last: string;
+    prev?: string;
+    next?: string;
   };
+  meta: {
+    total: number;
+    limit: number;
+    offset: number;
+  };
+  data: Conversation[];
 }
 
 export interface Message {
@@ -290,6 +296,25 @@ export interface RoadmapCategoryOverview {
   prerequisites_met: boolean;
   total_steps: number;
   completed_steps: number;
+  display_name?: string;
+  svg?: string | null;
+}
+
+// ── Document upload ──────────────────────────────────────────────────────────
+
+export interface DocumentPreview {
+  type: 'image';
+  url: string;
+  width: 200;
+  height: 200;
+}
+
+export interface UploadedDocument {
+  document_id: string;
+  s3_url: string;
+  file_type: string;
+  size_bytes: number;
+  preview: DocumentPreview | null;
 }
 
 export interface RoadmapOverview {
@@ -307,6 +332,8 @@ export interface RoadmapStepDetail {
   id: string;
   step_number: number;
   question_key: string;
+  title: string;
+  content: string;
   question_text: string;
   question_type: 'open' | 'single_choice' | 'multi_choice' | 'yes_no' | 'info';
   options: StepOption[] | null;

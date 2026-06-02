@@ -29,11 +29,17 @@ export interface OnboardingSocketOptions {
   getToken: () => string | null;
   onAuthError?: () => void;
   onNotification?: (notification: Notification) => void;
+  /** BCP-47 base language tag (e.g. "nl", "ar"). Passed as WS query param. */
+  userLanguage?: string;
+  /** Called when the backend signals translation is in progress. */
+  onThinking?: () => void;
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 let _reqCounter = 0;
+const REQUEST_TIMEOUT_MS = 120_000;
+
 function nextReqId(): string {
   return `ob-${++_reqCounter}-${Date.now()}`;
 }
@@ -57,7 +63,7 @@ export function useOnboardingSocket(options: OnboardingSocketOptions) {
 
   /** Standard request-response pending map (keyed by req_id). */
   const pendingRef = useRef<
-    Map<string, { resolve: (data: any) => void; reject: (err: Error) => void }>
+    Map<string, { resolve: (data: any) => void; reject: (err: Error) => void; timeout: ReturnType<typeof setTimeout> }>
   >(new Map());
 
   /**
@@ -76,12 +82,22 @@ export function useOnboardingSocket(options: OnboardingSocketOptions) {
       wsRef.current.close(1000);
       wsRef.current = null;
     }
-    for (const { reject } of pendingRef.current.values()) {
+    for (const { reject, timeout } of pendingRef.current.values()) {
+      clearTimeout(timeout);
       reject(new Error('WebSocket disconnected'));
     }
     pendingRef.current.clear();
     progressHandlersRef.current.clear();
     setState('disconnected');
+  }, []);
+
+  const rejectPending = useCallback((message: string) => {
+    for (const { reject, timeout } of pendingRef.current.values()) {
+      clearTimeout(timeout);
+      reject(new Error(message));
+    }
+    pendingRef.current.clear();
+    progressHandlersRef.current.clear();
   }, []);
 
   const connect = useCallback(() => {
@@ -97,7 +113,12 @@ export function useOnboardingSocket(options: OnboardingSocketOptions) {
 
     const wsBase = process.env.NEXT_PUBLIC_API_WS_URL ||
       `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/ws`;
-    const ws = new WebSocket(`${wsBase}/onboarding`);
+    const lang = optionsRef.current.userLanguage || 'en';
+    const deviceLang =
+      typeof navigator !== 'undefined' ? navigator.language || 'en-US' : 'en-US';
+    const ws = new WebSocket(
+      `${wsBase}/onboarding?platform=web&device_language=${encodeURIComponent(deviceLang)}&user_language=${encodeURIComponent(lang)}`
+    );
     wsRef.current = ws;
 
     ws.onopen = () => {
@@ -121,13 +142,15 @@ export function useOnboardingSocket(options: OnboardingSocketOptions) {
 
         if (code.startsWith('auth.') || code === 'ws.auth_timeout') {
           setState('disconnected');
+          rejectPending(detail);
           optionsRef.current.onAuthError?.();
           return;
         }
 
         const reqId: string | undefined = err?.meta?.req_id;
         if (reqId && pendingRef.current.has(reqId)) {
-          const { reject } = pendingRef.current.get(reqId)!;
+          const { reject, timeout } = pendingRef.current.get(reqId)!;
+          clearTimeout(timeout);
           pendingRef.current.delete(reqId);
           progressHandlersRef.current.delete(reqId);
           reject(new Error(detail));
@@ -167,6 +190,10 @@ export function useOnboardingSocket(options: OnboardingSocketOptions) {
         case 'ws-pong':
           break;
 
+        case 'onboarding-thinking':
+          optionsRef.current.onThinking?.();
+          break;
+
         // Progress events from onboarding-complete-stream — call handler but
         // do NOT resolve the pending request yet (more progress events may follow).
         case 'onboarding-progress':
@@ -181,7 +208,8 @@ export function useOnboardingSocket(options: OnboardingSocketOptions) {
         // Final completion — resolve the pending promise
         case 'onboarding-complete-ok':
           if (reqId && pendingRef.current.has(reqId)) {
-            const { resolve } = pendingRef.current.get(reqId)!;
+            const { resolve, timeout } = pendingRef.current.get(reqId)!;
+            clearTimeout(timeout);
             pendingRef.current.delete(reqId);
             progressHandlersRef.current.delete(reqId);
             resolve({ type, attributes: attrs, id: data.id });
@@ -190,7 +218,8 @@ export function useOnboardingSocket(options: OnboardingSocketOptions) {
 
         default:
           if (reqId && pendingRef.current.has(reqId)) {
-            const { resolve } = pendingRef.current.get(reqId)!;
+            const { resolve, timeout } = pendingRef.current.get(reqId)!;
+            clearTimeout(timeout);
             pendingRef.current.delete(reqId);
             resolve({ type, attributes: attrs, id: data.id });
           }
@@ -201,6 +230,7 @@ export function useOnboardingSocket(options: OnboardingSocketOptions) {
     ws.onclose = (event) => {
       setState('disconnected');
       if (pingTimer.current) clearInterval(pingTimer.current);
+      rejectPending('WebSocket disconnected');
 
       if (event.code === 4001 || event.code === 4008) {
         optionsRef.current.onAuthError?.();
@@ -213,7 +243,7 @@ export function useOnboardingSocket(options: OnboardingSocketOptions) {
     ws.onerror = () => {
       // onclose fires after onerror — reconnect handled there
     };
-  }, [cleanup]);
+  }, [cleanup, rejectPending]);
 
   useEffect(() => {
     connect();
@@ -231,7 +261,12 @@ export function useOnboardingSocket(options: OnboardingSocketOptions) {
           return;
         }
         const reqId = nextReqId();
-        pendingRef.current.set(reqId, { resolve, reject });
+        const timeout = setTimeout(() => {
+          pendingRef.current.delete(reqId);
+          progressHandlersRef.current.delete(reqId);
+          reject(new Error('WebSocket request timed out'));
+        }, REQUEST_TIMEOUT_MS);
+        pendingRef.current.set(reqId, { resolve, reject, timeout });
         ws.send(wsRequest(type, { ...(attributes ?? {}), req_id: reqId }));
       });
     },
@@ -303,7 +338,12 @@ export function useOnboardingSocket(options: OnboardingSocketOptions) {
           return;
         }
         const reqId = nextReqId();
-        pendingRef.current.set(reqId, { resolve, reject });
+        const timeout = setTimeout(() => {
+          pendingRef.current.delete(reqId);
+          progressHandlersRef.current.delete(reqId);
+          reject(new Error('WebSocket request timed out'));
+        }, REQUEST_TIMEOUT_MS);
+        pendingRef.current.set(reqId, { resolve, reject, timeout });
         if (onProgress) {
           progressHandlersRef.current.set(reqId, onProgress);
         }

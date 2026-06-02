@@ -1,19 +1,24 @@
 import { useState, useEffect, useRef, useCallback, FormEvent } from 'react';
 import { useRouter } from 'next/router';
 import { apiClient } from '@/lib/api-client';
+import { getUserLanguage } from '@/lib/user-language';
 import { useAskSocket } from '@/lib/use-ask-socket';
 import { useOnboardingSocket } from '@/lib/use-onboarding-socket';
 import { ContentBlockRenderer } from '@/components/ContentBlockRenderer';
 import { MessageSkeleton, ConversationSkeleton } from '@/components/Skeleton';
 import { NotificationToast } from '@/components/NotificationToast';
+import { LanguageSelector } from '@/components/LanguageSelector';
+import { DocumentUpload } from '@/components/DocumentUpload';
 import type { ToastNotification } from '@/components/NotificationToast';
-import type { 
-  Conversation, 
-  Message, 
+import type {
+  Conversation,
+  Message,
   ContentBlock,
   AskResponse,
   OnboardingQuestion,
+  UploadedDocument,
 } from '@/lib/types';
+import { MarkdownRenderer } from '@/components/MarkdownRenderer';
 
 type Mode = 'ask' | 'roadmap';
 
@@ -26,6 +31,7 @@ interface DisplayMessage {
   isStreaming?: boolean;
   isThinking?: boolean;
   failed?: boolean;
+  attachment?: { filename: string; file_type: string; preview: import('@/lib/types').DocumentPreview | null };
 }
 
 const SOURCE_TAG_CACHE_KEY = 'sourceTagCacheByConversation';
@@ -154,6 +160,11 @@ export default function Chat() {
   const [inputMessage, setInputMessage] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  const [attachedDoc, setAttachedDoc] = useState<UploadedDocument | null>(null);
+  // Persists the document_id for the active conversation so follow-up messages
+  // automatically include it — the backend caches the extracted text so
+  // subsequent calls are fast (no re-download, no re-OCR).
+  const [activeConvDocumentId, setActiveConvDocumentId] = useState<string | null>(null);
   const chatFormRef = useRef<HTMLFormElement>(null);
 
   // Roadmap onboarding state
@@ -180,6 +191,7 @@ export default function Chat() {
     onAuthError: () => {
       apiClient.logout();
     },
+    userLanguage: getUserLanguage(),
     onNotification: (notification) => {
       // Show toast for all notifications
       setActiveToast({
@@ -197,6 +209,8 @@ export default function Chat() {
     },
   });
 
+  const ONBOARDING_THINKING_ID = 'onboarding-thinking-bubble';
+
   // WebSocket connection for onboarding flow
   const {
     getSession: wsGetOnboardingSession,
@@ -208,6 +222,13 @@ export default function Chat() {
   } = useOnboardingSocket({
     getToken: () => apiClient.getAccessToken(),
     onAuthError: () => apiClient.logout(),
+    userLanguage: getUserLanguage(),
+    onThinking: () => {
+      setMessages(prev => {
+        if (prev.some(m => m.id === ONBOARDING_THINKING_ID)) return prev;
+        return [...prev, { id: ONBOARDING_THINKING_ID, role: 'assistant', content: '', isThinking: true }];
+      });
+    },
   });
 
   // Initialize
@@ -237,7 +258,7 @@ export default function Chat() {
     setMessagesLoading(true);
 
     try {
-      const welcome = await apiClient.getWelcomeMessage(mode);
+      const welcome = await apiClient.getWelcomeMessage(getUserLanguage());
       if (requestId !== messageLoadRequestIdRef.current) {
         return;
       }
@@ -283,7 +304,7 @@ export default function Chat() {
     setConversationsLoading(true);
     try {
       const response = await apiClient.getConversations(page * 20, 20);
-      const newConversations = response.attributes.items;
+      const newConversations = response.data;
 
       if (page === 0) {
         setConversations(newConversations);
@@ -291,7 +312,7 @@ export default function Chat() {
         setConversations(prev => [...prev, ...newConversations]);
       }
 
-      setHasMoreConversations(newConversations.length === 20);
+      setHasMoreConversations(!!response.links.next);
       setConversationsPage(page);
     } catch (error) {
       console.error('Failed to load conversations:', error);
@@ -314,6 +335,8 @@ export default function Chat() {
     const requestId = ++messageLoadRequestIdRef.current;
     setCurrentConversationId(conversationId);
     setMessagesLoading(true);
+    // Clear active document context when switching conversations
+    setActiveConvDocumentId(null);
 
     try {
       const response = await apiClient.getConversationMessages(conversationId);
@@ -328,13 +351,27 @@ export default function Chat() {
         role: msg.attributes.role,
         content: msg.attributes.content,
         content_blocks: msg.attributes.content_blocks || undefined,
+        attachment: (msg.attributes as any).attachment || undefined,
       })).map((msg) => ({
         id: msg.id,
         role: msg.role,
         content: msg.content,
         content_blocks: msg.content_blocks,
         sources: msg.sourcesFromBlocks.length > 0 ? msg.sourcesFromBlocks : msg.persistedSources,
+        attachment: msg.attachment
+          ? {
+              filename: msg.attachment.file_type?.toUpperCase() ?? 'DOC',
+              file_type: msg.attachment.file_type ?? '',
+              preview: msg.attachment.preview ?? null,
+            }
+          : undefined,
       }));
+      // Restore active document context from the most recent user message with an attachment
+      const lastDocMsg = [...msgs].reverse().find(m => m.role === 'user' && m.attachment);
+      if (lastDocMsg) {
+        const docId = (response.attributes.items.find((m: Message) => m.id === lastDocMsg.id)?.attributes as any)?.attachment?.document_id;
+        if (docId) setActiveConvDocumentId(docId);
+      }
       setMessages(msgs);
     } catch (error) {
       console.error('Failed to load messages:', error);
@@ -412,11 +449,19 @@ export default function Chat() {
     setSendError(null);
     setIsSending(true);
 
+    const pendingDoc = attachedDoc;
+    // Resolve the effective document_id: prefer a freshly attached doc,
+    // fall back to the active document for this conversation (follow-up).
+    const effectiveDocId = pendingDoc?.document_id ?? activeConvDocumentId ?? undefined;
+
     // Add user message immediately
     const tempUserMsg: DisplayMessage = {
       id: `temp-${Date.now()}`,
       role: 'user',
       content: userMessage,
+      attachment: pendingDoc
+        ? { filename: pendingDoc.file_type.toUpperCase(), file_type: pendingDoc.file_type, preview: pendingDoc.preview }
+        : undefined,
     };
     setMessages(prev => [...prev, tempUserMsg]);
 
@@ -425,15 +470,22 @@ export default function Chat() {
       const streamingId = `streaming-${Date.now()}`;
       setMessages(prev => [
         ...prev,
-        { id: streamingId, role: 'assistant', content: '', isStreaming: true },
+        { id: streamingId, role: 'assistant', content: '', isThinking: true, isStreaming: true },
       ]);
 
       let accumulated = '';
+
+      setAttachedDoc(null);
+      // Persist document_id for follow-ups; clear it if no document is active
+      if (effectiveDocId) {
+        setActiveConvDocumentId(effectiveDocId);
+      }
 
       socketAsk(
         {
           message: userMessage,
           conversation_id: currentConversationId || undefined,
+          document_id: effectiveDocId,
         },
         {
           onStatus(stage: string, message: string) {
@@ -447,6 +499,7 @@ export default function Chat() {
           },
 
           onDelta(chunk: string) {
+            console.log(`Chunk ${chunk}`)
             accumulated += chunk;
             setMessages(prev =>
               prev.map(m =>
@@ -527,10 +580,16 @@ export default function Chat() {
       { id: thinkingId, role: 'assistant', content: '', isThinking: true },
     ]);
 
+    setAttachedDoc(null);
+    if (effectiveDocId) {
+      setActiveConvDocumentId(effectiveDocId);
+    }
+
     try {
       const response: AskResponse = await apiClient.ask({
         message: userMessage,
         conversation_id: currentConversationId || undefined,
+        document_id: effectiveDocId,
       });
 
       // Update conversation ID if new
@@ -828,7 +887,7 @@ export default function Chat() {
     }
   };
 
-  const handleOnboardingAnswer = async (answer: string) => {
+  const handleOnboardingAnswer = async (answer: string, displayLabel?: string) => {
     if (!onboardingQuestion || onboardingSubmitting) return;
 
     const currentQ = onboardingQuestion;
@@ -837,11 +896,12 @@ export default function Chat() {
     // Add user answer to messages — suffix with timestamp to ensure uniqueness
     // when the same question key is re-asked (e.g. municipality_city after
     // postcode confirm "no").
+    // Show the translated label the user saw, not the raw value sent to backend.
     const msgTs = Date.now();
     setMessages(prev => [...prev, {
       id: `onboarding-a-${questionKey}-${msgTs}`,
       role: 'user',
-      content: answer,
+      content: displayLabel || answer,
     }]);
 
     setOnboardingSubmitting(true);
@@ -855,6 +915,9 @@ export default function Chat() {
         currentAnswers,
       );
 
+      // Remove thinking bubble now that the response has arrived
+      setMessages(prev => prev.filter(m => m.id !== ONBOARDING_THINKING_ID));
+
       const { question: nextQ, progress } = resp.attributes;
 
       // Use backend's authoritative answered dict — it may have mutated keys
@@ -862,6 +925,7 @@ export default function Chat() {
       const updatedAnswers: Record<string, string> = progress.answered ?? { ...currentAnswers, [questionKey]: answer };
       setOnboardingAnswers(updatedAnswers);
       onboardingAnswersRef.current = updatedAnswers;
+
       // Progress is saved automatically by the backend answer endpoint
       setOnboardingProgress({ current: progress.current_index + 1, total: progress.total_questions });
 
@@ -903,6 +967,8 @@ export default function Chat() {
         }
       }
     } catch (error: any) {
+      // Remove thinking bubble on error
+      setMessages(prev => prev.filter(m => m.id !== ONBOARDING_THINKING_ID));
       // WS hook rejects with a plain Error; the message contains the backend detail.
       // Also handle legacy JSON:API shapes for compatibility.
       const validationError =
@@ -984,6 +1050,7 @@ export default function Chat() {
               Logout
             </button>
           </div>
+          <LanguageSelector />
         </div>
 
         <div 
@@ -1041,6 +1108,22 @@ export default function Chat() {
           ) : (
             messages.map((message) => (
               <div key={message.id} className={`message ${message.role}${message.failed ? ' failed' : ''}`}>
+                {message.attachment && (
+                  <div className="message-attachment">
+                    {message.attachment.preview ? (
+                      <img
+                        src={message.attachment.preview.url}
+                        alt="attachment preview"
+                        className="msg-attachment-thumb"
+                      />
+                    ) : (
+                      <span className="msg-attachment-icon" aria-hidden="true">📎</span>
+                    )}
+                    <span className="msg-attachment-label">
+                      {message.attachment.file_type.toUpperCase()}
+                    </span>
+                  </div>
+                )}
                 <div className="message-content">
                   {message.isThinking ? (
                     <div className="thinking-status">
@@ -1051,14 +1134,11 @@ export default function Chat() {
                         <span /><span /><span />
                       </span>
                     </div>
-                  ) : message.content_blocks ? (
+                  ) : message.content_blocks && message.content_blocks.length > 0 ? (
                     <ContentBlockRenderer blocks={message.content_blocks} />
                   ) : (
                     <>
-                      {message.content}
-                      {message.isStreaming && (
-                        <span className="streaming-cursor" aria-hidden="true" />
-                      )}
+                     <MarkdownRenderer content={message.content} />
                     </>
                   )}
                 </div>
@@ -1121,11 +1201,16 @@ export default function Chat() {
           {/* Onboarding option buttons — directly under the question */}
           {onboardingActive && onboardingQuestion && (() => {
             if (onboardingQuestion.type === 'yes_no') {
+              // Use translated labels from backend options; fall back to English
+              const yesOpt = onboardingQuestion.options?.find(o => o.value === 'yes');
+              const noOpt = onboardingQuestion.options?.find(o => o.value === 'no');
+              const yesLabel = yesOpt?.label ?? 'Yes';
+              const noLabel = noOpt?.label ?? 'No';
               return (
                 <div className="onboarding-options-wrap">
                   <div className="onboarding-options">
-                    <button className="onboarding-option-btn" onClick={() => handleOnboardingAnswer('yes')} disabled={onboardingSubmitting}>Yes</button>
-                    <button className="onboarding-option-btn" onClick={() => handleOnboardingAnswer('no')} disabled={onboardingSubmitting}>No</button>
+                    <button className="onboarding-option-btn" onClick={() => handleOnboardingAnswer('yes', yesLabel)} disabled={onboardingSubmitting}>{yesLabel}</button>
+                    <button className="onboarding-option-btn" onClick={() => handleOnboardingAnswer('no', noLabel)} disabled={onboardingSubmitting}>{noLabel}</button>
                   </div>
                 </div>
               );
@@ -1135,7 +1220,7 @@ export default function Chat() {
                 <div className="onboarding-options-wrap">
                   <div className="onboarding-options">
                     {onboardingQuestion.options.map((opt) => (
-                      <button key={opt.value} className="onboarding-option-btn" onClick={() => handleOnboardingAnswer(opt.value)} disabled={onboardingSubmitting}>
+                      <button key={opt.value} className="onboarding-option-btn" onClick={() => handleOnboardingAnswer(opt.value, opt.label)} disabled={onboardingSubmitting}>
                         {opt.label}
                       </button>
                     ))}
@@ -1185,6 +1270,46 @@ export default function Chat() {
               </button>
             </div>
           )}
+          {attachedDoc && (
+            <div className="attachment-chip">
+              {attachedDoc.preview ? (
+                <img
+                  src={attachedDoc.preview.url}
+                  alt="preview"
+                  className="attachment-chip-thumb"
+                />
+              ) : (
+                <span className="attachment-chip-icon" aria-hidden="true">📎</span>
+              )}
+              <span className="attachment-chip-name">
+                {attachedDoc.file_type.toUpperCase()}
+              </span>
+              <button
+                type="button"
+                className="attachment-chip-remove"
+                aria-label="Remove attachment"
+                onClick={() => setAttachedDoc(null)}
+              >
+                ×
+              </button>
+            </div>
+          )}
+          {/* Show when document context is active for this conversation (no new attachment pending) */}
+          {!attachedDoc && activeConvDocumentId && (
+            <div className="active-doc-context-chip">
+              <span className="active-doc-context-icon" aria-hidden="true">📄</span>
+              <span className="active-doc-context-label">Document context active</span>
+              <button
+                type="button"
+                className="active-doc-context-remove"
+                aria-label="Clear document context"
+                title="Stop sending document context with messages"
+                onClick={() => setActiveConvDocumentId(null)}
+              >
+                ×
+              </button>
+            </div>
+          )}
           <form ref={chatFormRef} onSubmit={handleSendMessage} className="chat-input-wrapper">
             <textarea
               className="chat-input"
@@ -1203,8 +1328,15 @@ export default function Chat() {
               disabled={isSending || onboardingSubmitting || (onboardingActive && onboardingQuestion?.type !== 'open')}
               readOnly={onboardingActive && onboardingQuestion?.type !== 'open'}
             />
-            <button 
-              type="submit" 
+            {mode === 'ask' && !onboardingActive && (
+              <DocumentUpload
+                disabled={isSending}
+                onComplete={(doc) => setAttachedDoc(doc)}
+                onError={(msg) => setSendError(msg)}
+              />
+            )}
+            <button
+              type="submit"
               className="btn-send"
               disabled={isSending || onboardingSubmitting || !inputMessage.trim() || (onboardingActive && onboardingQuestion?.type !== 'open')}
             >

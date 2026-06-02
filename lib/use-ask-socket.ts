@@ -24,6 +24,8 @@ export interface AskSocketOptions {
   getToken: () => string | null;
   onAuthError?: () => void;
   onNotification?: (notification: Notification) => void;
+  /** BCP-47 base language tag (e.g. "nl", "ar"). Passed as WS query param. */
+  userLanguage?: string;
 }
 
 // ── JSON:API 1.1 envelope helpers ──
@@ -68,7 +70,12 @@ export function useAskSocket(options: AskSocketOptions) {
 
     const wsBase = process.env.NEXT_PUBLIC_API_WS_URL ||
       `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/ws`;
-    const ws = new WebSocket(`${wsBase}/ask`);
+    const lang = optionsRef.current.userLanguage || 'en';
+    const deviceLang =
+      typeof navigator !== 'undefined' ? navigator.language || 'en-US' : 'en-US';
+    const ws = new WebSocket(
+      `${wsBase}/ask?platform=web&device_language=${encodeURIComponent(deviceLang)}&user_language=${encodeURIComponent(lang)}`
+    );
     wsRef.current = ws;
 
     ws.onopen = () => {
@@ -180,7 +187,7 @@ export function useAskSocket(options: AskSocketOptions) {
 
   const ask = useCallback(
     (
-      payload: { message: string; conversation_id?: string; max_new_tokens?: number },
+      payload: { message: string; conversation_id?: string; max_new_tokens?: number; document_id?: string },
       handlers: AskSocketHandlers
     ) => {
       handlersRef.current = handlers;
@@ -195,6 +202,7 @@ export function useAskSocket(options: AskSocketOptions) {
           message: payload.message,
           conversation_id: payload.conversation_id ?? null,
           max_new_tokens: payload.max_new_tokens ?? null,
+          document_id: payload.document_id ?? null,
         })
       );
     },

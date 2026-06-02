@@ -31,11 +31,15 @@ export interface RoadmapSocketOptions {
   getToken: () => string | null;
   onAuthError?: () => void;
   onNotification?: (notification: Notification) => void;
+  /** BCP-47 base language tag (e.g. "nl", "ar"). Passed as WS query param. */
+  userLanguage?: string;
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 let _reqCounter = 0;
+const REQUEST_TIMEOUT_MS = 120_000;
+
 function nextReqId(): string {
   return `rm-${++_reqCounter}-${Date.now()}`;
 }
@@ -66,7 +70,7 @@ export function useRoadmapSocket(options: RoadmapSocketOptions) {
    * we check the meta.req_id to find the matching pending request.
    */
   const pendingRef = useRef<
-    Map<string, { resolve: (data: any) => void; reject: (err: Error) => void }>
+    Map<string, { resolve: (data: any) => void; reject: (err: Error) => void; timeout: ReturnType<typeof setTimeout> }>
   >(new Map());
 
   const cleanup = useCallback(() => {
@@ -78,11 +82,20 @@ export function useRoadmapSocket(options: RoadmapSocketOptions) {
       wsRef.current = null;
     }
     // Reject all pending requests
-    for (const { reject } of pendingRef.current.values()) {
+    for (const { reject, timeout } of pendingRef.current.values()) {
+      clearTimeout(timeout);
       reject(new Error('WebSocket disconnected'));
     }
     pendingRef.current.clear();
     setState('disconnected');
+  }, []);
+
+  const rejectPending = useCallback((message: string) => {
+    for (const { reject, timeout } of pendingRef.current.values()) {
+      clearTimeout(timeout);
+      reject(new Error(message));
+    }
+    pendingRef.current.clear();
   }, []);
 
   const connect = useCallback(() => {
@@ -98,7 +111,12 @@ export function useRoadmapSocket(options: RoadmapSocketOptions) {
 
     const wsBase = process.env.NEXT_PUBLIC_API_WS_URL ||
       `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/ws`;
-    const ws = new WebSocket(`${wsBase}/roadmap`);
+    const lang = optionsRef.current.userLanguage || 'en';
+    const deviceLang =
+      typeof navigator !== 'undefined' ? navigator.language || 'en-US' : 'en-US';
+    const ws = new WebSocket(
+      `${wsBase}/roadmap?platform=web&device_language=${encodeURIComponent(deviceLang)}&user_language=${encodeURIComponent(lang)}`
+    );
     wsRef.current = ws;
 
     ws.onopen = () => {
@@ -122,6 +140,7 @@ export function useRoadmapSocket(options: RoadmapSocketOptions) {
 
         if (code.startsWith('auth.') || code === 'ws.auth_timeout') {
           setState('disconnected');
+          rejectPending(detail);
           optionsRef.current.onAuthError?.();
           return;
         }
@@ -129,7 +148,8 @@ export function useRoadmapSocket(options: RoadmapSocketOptions) {
         // Route error to pending request if req_id is present
         const reqId: string | undefined = err?.meta?.req_id;
         if (reqId && pendingRef.current.has(reqId)) {
-          const { reject } = pendingRef.current.get(reqId)!;
+          const { reject, timeout } = pendingRef.current.get(reqId)!;
+          clearTimeout(timeout);
           pendingRef.current.delete(reqId);
           reject(new Error(detail));
         }
@@ -171,7 +191,8 @@ export function useRoadmapSocket(options: RoadmapSocketOptions) {
         default:
           // Route to pending request by req_id
           if (reqId && pendingRef.current.has(reqId)) {
-            const { resolve } = pendingRef.current.get(reqId)!;
+            const { resolve, timeout } = pendingRef.current.get(reqId)!;
+            clearTimeout(timeout);
             pendingRef.current.delete(reqId);
             resolve({ type, attributes: attrs, id: data.id });
           }
@@ -182,6 +203,7 @@ export function useRoadmapSocket(options: RoadmapSocketOptions) {
     ws.onclose = (event) => {
       setState('disconnected');
       if (pingTimer.current) clearInterval(pingTimer.current);
+      rejectPending('WebSocket disconnected');
 
       if (event.code === 4001 || event.code === 4008) {
         optionsRef.current.onAuthError?.();
@@ -194,7 +216,7 @@ export function useRoadmapSocket(options: RoadmapSocketOptions) {
     ws.onerror = () => {
       // onclose fires after onerror — reconnect handled there
     };
-  }, [cleanup]);
+  }, [cleanup, rejectPending]);
 
   useEffect(() => {
     connect();
@@ -213,7 +235,11 @@ export function useRoadmapSocket(options: RoadmapSocketOptions) {
         }
 
         const reqId = nextReqId();
-        pendingRef.current.set(reqId, { resolve, reject });
+        const timeout = setTimeout(() => {
+          pendingRef.current.delete(reqId);
+          reject(new Error('WebSocket request timed out'));
+        }, REQUEST_TIMEOUT_MS);
+        pendingRef.current.set(reqId, { resolve, reject, timeout });
         ws.send(wsRequest(type, { ...(attributes ?? {}), req_id: reqId }));
       });
     },

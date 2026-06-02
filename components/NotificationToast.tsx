@@ -12,6 +12,8 @@ interface NotificationToastProps {
   notification: ToastNotification | null;
   onDismiss: () => void;
   onAction?: (url: string) => void;
+  /** Label for the action button. Default: "View →" */
+  actionLabel?: string;
   /** Auto-dismiss after this many ms. Default: 8000 */
   autoDismissMs?: number;
 }
@@ -20,6 +22,7 @@ export function NotificationToast({
   notification,
   onDismiss,
   onAction,
+  actionLabel = 'View →',
   autoDismissMs = 8000,
 }: NotificationToastProps) {
   const timerRef = useRef<ReturnType<typeof setTimeout>>();
@@ -106,7 +109,7 @@ export function NotificationToast({
             alignSelf: 'flex-start',
           }}
         >
-          View →
+          {actionLabel}
         </button>
       )}
     </div>

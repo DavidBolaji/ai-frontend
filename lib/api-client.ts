@@ -1,3 +1,4 @@
+import { getUserLanguage } from './user-language';
 import type {
   AuthSession,
   LoginPayload,
@@ -194,8 +195,13 @@ class ApiClient {
     options: RequestInit = {},
     retry = true
   ): Promise<T> {
+    const lang = getUserLanguage();
+    const deviceLang =
+      typeof navigator !== 'undefined' ? navigator.language || 'en-US' : 'en-US';
     const headers: Record<string, string> = {
       'Content-Type': 'application/vnd.api+json',
+      'FrgX-Default-Device-Language': deviceLang,
+      'FrgX-User-Preferred-Language': lang,
       ...(options.headers as Record<string, string>),
     };
 
@@ -457,8 +463,8 @@ class ApiClient {
   }
 
   // Conversation endpoints
-  async getWelcomeMessage(mode: 'ask' | 'roadmap'): Promise<WelcomeMessage> {
-    return this.request<WelcomeMessage>(`/welcome/${mode}`);
+  async getWelcomeMessage(lang: string): Promise<WelcomeMessage> {
+    return this.request<WelcomeMessage>(`/welcome/${encodeURIComponent(lang)}`);
   }
 
   async ask(payload: AskPayload): Promise<AskResponse> {
@@ -480,9 +486,9 @@ class ApiClient {
     return this.streamRequest<AskResponse>('/ask/stream', wrapped, handlers);
   }
 
-  async getConversations(skip = 0, limit = 20): Promise<ConversationListResponse> {
+  async getConversations(offset = 0, limit = 20): Promise<ConversationListResponse> {
     return this.request<ConversationListResponse>(
-      `/conversations?skip=${skip}&limit=${limit}`
+      `/conversations?page[limit]=${limit}&page[offset]=${offset}`
     );
   }
 

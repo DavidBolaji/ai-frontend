@@ -2,9 +2,12 @@ import { useState, useEffect, useRef, useCallback, FormEvent } from 'react';
 import { useRouter } from 'next/router';
 import { apiClient } from '@/lib/api-client';
 import { useRoadmapSocket } from '@/lib/use-roadmap-socket';
+import { getUserLanguage } from '@/lib/user-language';
+import { MarkdownRenderer } from '@/components/MarkdownRenderer';
 import { ContentBlockRenderer } from '@/components/ContentBlockRenderer';
 import { MessageSkeleton } from '@/components/Skeleton';
 import { NotificationToast } from '@/components/NotificationToast';
+import { LanguageSelector } from '@/components/LanguageSelector';
 import type { ToastNotification } from '@/components/NotificationToast';
 import type {
   RoadmapCategoryOverview,
@@ -13,14 +16,14 @@ import type {
 } from '@/lib/types';
 
 const CATEGORY_LABELS: Record<string, string> = {
-  municipality: 'Municipality',
-  health: 'Health',
+  municipality: 'Registration',
+  health: 'Healthcare',
   housing: 'Housing',
   language: 'Language',
-  social: 'Sports',
-  african_diaspora: 'African Diaspora',
+  social: 'Sports & Community',
+  african_diaspora: 'African Communities',
   transportation: 'Transportation',
-  education: 'Schooling',
+  education: 'Education',
   permanent_residency: 'Permanent Residency',
   job: 'Job & Employment',
 };
@@ -63,6 +66,28 @@ const sortCategoriesStable = (cats: RoadmapCategoryOverview[]): RoadmapCategoryO
   });
 };
 
+/** Render SVG if available, otherwise fall back to emoji. */
+function CategoryIcon({
+  category,
+  svg,
+  size = 24,
+}: {
+  category: string;
+  svg?: string | null;
+  size?: number;
+}) {
+  if (svg) {
+    return (
+      <span
+        aria-hidden="true"
+        style={{ display: 'inline-flex', width: size, height: size, flexShrink: 0 }}
+        dangerouslySetInnerHTML={{ __html: svg }}
+      />
+    );
+  }
+  return <span aria-hidden="true">{CATEGORY_ICONS[category] || '📌'}</span>;
+}
+
 function PaperPlaneIcon() {
   return (
     <svg
@@ -85,9 +110,40 @@ interface StepChatMessage {
   content_blocks?: ContentBlock[];
 }
 
+// BSN gate UI strings translated per language.
+// Only languages where users are likely to see the BSN gate step need entries;
+// all others fall back to English.
+const BSN_STRINGS: Record<string, { yes: string; notYet: string; waiting: string; hasBsn: string; frozenMsg: string; prompt: string; view: string }> = {
+  en: { yes: '✅ Yes, I have my BSN', notYet: '⏳ Not yet', waiting: '⏳ Waiting — confirm BSN when received...', hasBsn: 'Yes, I have my BSN', frozenMsg: '🔒 You must have your BSN before continuing. Select "Yes, I have my BSN" once it arrives.', prompt: 'Have you received your BSN?', view: 'View →' },
+  nl: { yes: '✅ Ja, ik heb mijn BSN', notYet: '⏳ Nog niet', waiting: '⏳ Wachten — bevestig je BSN wanneer je het ontvangen hebt...', hasBsn: 'Ja, ik heb mijn BSN', frozenMsg: '🔒 Je hebt je BSN nodig om verder te gaan. Selecteer "Ja, ik heb mijn BSN" zodra het aankomt.', prompt: 'Heb je je BSN ontvangen?', view: 'Bekijken →' },
+  ar: { yes: '✅ نعم، لدي رقم BSN', notYet: '⏳ ليس بعد', waiting: '⏳ انتظار — أكد رقم BSN عند استلامه...', hasBsn: 'نعم، لدي رقم BSN', frozenMsg: '🔒 يجب أن يكون لديك رقم BSN قبل المتابعة. اختر "نعم، لدي رقم BSN" بمجرد وصوله.', prompt: 'هل استلمت رقم BSN الخاص بك؟', view: 'عرض →' },
+  tr: { yes: '✅ Evet, BSN numaram var', notYet: '⏳ Henüz değil', waiting: '⏳ Bekleniyor — aldığınızda BSN\'nizi onaylayın...', hasBsn: 'Evet, BSN numaram var', frozenMsg: '🔒 Devam etmeden önce BSN numaranız olmalıdır. Geldiğinde "Evet, BSN numaram var" seçeneğini belirleyin.', prompt: 'BSN numaranızı aldınız mı?', view: 'Görüntüle →' },
+  fr: { yes: '✅ Oui, j\'ai mon BSN', notYet: '⏳ Pas encore', waiting: '⏳ En attente — confirmez votre BSN à réception...', hasBsn: 'Oui, j\'ai mon BSN', frozenMsg: '🔒 Vous devez avoir votre BSN avant de continuer. Sélectionnez "Oui, j\'ai mon BSN" dès réception.', prompt: 'Avez-vous reçu votre BSN ?', view: 'Voir →' },
+  de: { yes: '✅ Ja, ich habe mein BSN', notYet: '⏳ Noch nicht', waiting: '⏳ Warten — bestätige dein BSN, sobald du es erhalten hast...', hasBsn: 'Ja, ich habe mein BSN', frozenMsg: '🔒 Du musst dein BSN haben, bevor du fortfahren kannst. Wähle "Ja, ich habe mein BSN", sobald es eintrifft.', prompt: 'Hast du dein BSN erhalten?', view: 'Anzeigen →' },
+  so: { yes: '✅ Haa, waxaan leeyahay BSN-kayga', notYet: '⏳ Weli ma ahayn', waiting: '⏳ Sugitaanka — xaqiiji BSN-kaaga markaad hesho...', hasBsn: 'Haa, waxaan leeyahay BSN-kayga', frozenMsg: '🔒 Waa inaad leedahay BSN-kaaga ka hor intaadan sii wadin. Dooro "Haa, waxaan leeyahay BSN-kayga" marka ay timaado.', prompt: 'Ma heshay BSN-kaaga?', view: 'Eeg →' },
+  ti: { yes: '✅ እወ፣ ቢኤስኤን ኣሎኒ', notYet: '⏳ ገና ኣይኮነን', waiting: '⏳ ምጽባይ — ቢኤስኤን ምስ ተቐቢልካ ኣረጋግጽ...', hasBsn: 'እወ፣ ቢኤስኤን ኣሎኒ', frozenMsg: '🔒 ቅድሚ ቀጺልካ ቢኤስኤን ክህልወካ ኣለዎ። ምስ ኣተወ "እወ፣ ቢኤስኤን ኣሎኒ" ምረጽ።', prompt: 'ቢኤስኤን ተቐቢልካ ዶ?', view: 'ክፈት →' },
+  uk: { yes: '✅ Так, у мене є BSN', notYet: '⏳ Ще ні', waiting: '⏳ Очікування — підтвердіть BSN, коли отримаєте...', hasBsn: 'Так, у мене є BSN', frozenMsg: '🔒 Вам потрібен BSN, щоб продовжити. Оберіть "Так, у мене є BSN", коли він прийде.', prompt: 'Ви отримали свій BSN?', view: 'Переглянути →' },
+  ru: { yes: '✅ Да, у меня есть BSN', notYet: '⏳ Ещё нет', waiting: '⏳ Ожидание — подтвердите BSN, когда получите...', hasBsn: 'Да, у меня есть BSN', frozenMsg: '🔒 Для продолжения вам нужен BSN. Выберите "Да, у меня есть BSN", когда он придёт.', prompt: 'Вы получили свой BSN?', view: 'Просмотр →' },
+  pl: { yes: '✅ Tak, mam numer BSN', notYet: '⏳ Jeszcze nie', waiting: '⏳ Oczekiwanie — potwierdź BSN po otrzymaniu...', hasBsn: 'Tak, mam numer BSN', frozenMsg: '🔒 Musisz mieć numer BSN, aby kontynuować. Wybierz "Tak, mam numer BSN", gdy go otrzymasz.', prompt: 'Czy otrzymałeś/aś numer BSN?', view: 'Zobacz →' },
+  es: { yes: '✅ Sí, tengo mi BSN', notYet: '⏳ Todavía no', waiting: '⏳ Esperando — confirma el BSN cuando lo recibas...', hasBsn: 'Sí, tengo mi BSN', frozenMsg: '🔒 Necesitas tu BSN antes de continuar. Selecciona "Sí, tengo mi BSN" cuando llegue.', prompt: '¿Has recibido tu BSN?', view: 'Ver →' },
+  am: { yes: '✅ አዎ፣ BSN አለኝ', notYet: '⏳ እስካሁን አይደለም', waiting: '⏳ በጥበቃ ላይ — BSN ሲደርስ ያረጋግጡ...', hasBsn: 'አዎ፣ BSN አለኝ', frozenMsg: '🔒 ከመቀጠልዎ በፊት BSN ሊኖርዎ ይገባል። ሲደርስ "አዎ፣ BSN አለኝ" ይምረጡ።', prompt: 'BSN ደርሶዎታልን?', view: 'ይመልከቱ →' },
+  din: { yes: '✅ Ɛn, an tɔ̈ BSN', notYet: '⏳ Cïŋ ke', waiting: '⏳ Bɛ̈ nyic — mɛn BSN ka ŋoot bɛ yi dhuk...', hasBsn: 'Ɛn, an tɔ̈ BSN', frozenMsg: '🔒 Acïɣ tïŋ BSN ɣoa ke la bɛ̈n yok. Lɔ "Ɛn, an tɔ̈ BSN" ka ŋoot bɛ yi dhuk.', prompt: 'Yïn tɔ̈ BSN?', view: 'Cɔl →' },
+  ha: { yes: '✅ Eh, ina da BSN na', notYet: '⏳ Ba tukuna', waiting: '⏳ Jira — tabbatar da BSN idan ka samu...', hasBsn: 'Eh, ina da BSN na', frozenMsg: '🔒 Dole ne ka sami BSN kafin ci gaba. Zaɓi "Eh, ina da BSN na" da zarar ya isa.', prompt: 'Ka sami BSN ka?', view: 'Duba →' },
+  kri: { yes: '✅ Yes, a get mi BSN', notYet: '⏳ Nɔ yet', waiting: '⏳ Wɛtin — konfɛm BSN wen yu get am...', hasBsn: 'Yes, a get mi BSN', frozenMsg: '🔒 Yu nid yu BSN bɛfɔ yu kɔntinyuu. Sɛlɛkt "Yes, a get mi BSN" wen i kam.', prompt: 'Yu don get yu BSN?', view: 'Luk →' },
+  pcm: { yes: '✅ Yes, I get my BSN', notYet: '⏳ I neva get am yet', waiting: '⏳ I dey wait — confirm BSN when you get am...', hasBsn: 'Yes, I get my BSN', frozenMsg: '🔒 You must get your BSN before you continue. Select "Yes, I get my BSN" when e reach.', prompt: 'You don get your BSN?', view: 'View →' },
+  sn: { yes: '✅ Hongu, ndine BSN yangu', notYet: '⏳ Handisati', waiting: '⏳ Ndiri kumirira — simbisa BSN paunogamuchira...', hasBsn: 'Hongu, ndine BSN yangu', frozenMsg: '🔒 Unofanira kuva neBSN yako usati waenderera mberi. Sarudza "Hongu, ndine BSN yangu" inouya.', prompt: 'Wagamuchira BSN yako here?', view: 'Ona →' },
+  sw: { yes: '✅ Ndiyo, nina BSN yangu', notYet: '⏳ Bado', waiting: '⏳ Inasubiri — thibitisha BSN ukipata...', hasBsn: 'Ndiyo, nina BSN yangu', frozenMsg: '🔒 Unahitaji BSN yako kabla ya kuendelea. Chagua "Ndiyo, nina BSN yangu" ikifika.', prompt: 'Umepokea BSN yako?', view: 'Angalia →' },
+};
+
+function getBsnStrings(lang: string) {
+  return BSN_STRINGS[lang] || BSN_STRINGS['en'];
+}
+
 export default function Roadmap() {
   const router = useRouter();
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const userLang = getUserLanguage();
+  const bsnT = getBsnStrings(userLang);
 
   // Auth
   const [user, setUser] = useState<any>(null);
@@ -106,6 +162,7 @@ export default function Roadmap() {
   } = useRoadmapSocket({
     getToken: () => apiClient.getAccessToken(),
     onAuthError: () => apiClient.logout(),
+    userLanguage: getUserLanguage(),
     onNotification: (notification) => {
       // Always show the toast for every incoming push notification
       showToastRef.current({
@@ -138,6 +195,9 @@ export default function Roadmap() {
   // Selected category
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const [selectedCategoryName, setSelectedCategoryName] = useState('');
+  // Derived — used for SVG/display_name in header and step nav
+  const selectedCategoryData = categories.find(c => c.id === selectedCategoryId) ?? null;
+  const isCategoryCompleted = selectedCategoryData?.status === 'completed';
 
   // Monotonically increasing counter — each selectCategory call increments it.
   // After any await, we check the counter still matches; if not, the response
@@ -156,6 +216,7 @@ export default function Roadmap() {
   // Input
   const [inputMessage, setInputMessage] = useState('');
   const [isSending, setIsSending] = useState(false);
+  const [isPdfLoading, setIsPdfLoading] = useState(false);
 
   // Local answer selections (step id → selected value) — lets users pick before submitting
   const [selectedAnswers, setSelectedAnswers] = useState<Record<string, string>>({});
@@ -249,7 +310,7 @@ export default function Roadmap() {
     }
 
     // Reset BSN gate UI when navigating off step 5
-    if (step.question_key !== 'post_registration_info') {
+    if (step.question_key !== 'post_registration_info' && step.question_key !== 'rni_post_registration_info') {
       setBsnPromptVisible(false);
       setBsnFrozen(false);
       setBsnGateMessage(null);
@@ -259,7 +320,7 @@ export default function Roadmap() {
   // BSN gate: on reconnect / page refresh, server may have already set bsn_gate_ready
   useEffect(() => {
     const step = steps[currentStepIndex];
-    if (!step || step.question_key !== 'post_registration_info') return;
+    if (!step || (step.question_key !== 'post_registration_info' && step.question_key !== 'rni_post_registration_info')) return;
     if (step.answer === 'bsn_received') return;
 
     const meta = step.metadata_ as any;
@@ -519,7 +580,13 @@ export default function Roadmap() {
 
       // Update steps list with completed step, reset subsequent steps, and any new branch steps
       setSteps(prev => {
-        let updated = prev.map(s => s.id === completed_step.id ? completed_step : s);
+        // Merge completed_step: preserve existing translated fields (title/content/options)
+        // and only update the answer-related fields from the backend response.
+        let updated = prev.map(s =>
+          s.id === completed_step.id
+            ? { ...s, status: completed_step.status, answer: completed_step.answer, answer_data: completed_step.answer_data }
+            : s
+        );
 
         // Remove deleted branch steps (re-answer scenario)
         if (deleted_step_ids && deleted_step_ids.length > 0) {
@@ -527,10 +594,14 @@ export default function Roadmap() {
           updated = updated.filter(s => !deletedSet.has(s.id));
         }
 
-        // Apply reset steps: replace each reset step in the list
+        // Apply reset steps: merge status/answer only to preserve translated content
         if (reset_steps && reset_steps.length > 0) {
           const resetMap = new Map(reset_steps.map(rs => [rs.id, rs]));
-          updated = updated.map(s => resetMap.has(s.id) ? resetMap.get(s.id)! : s);
+          updated = updated.map(s => {
+            if (!resetMap.has(s.id)) return s;
+            const rs = resetMap.get(s.id)!;
+            return { ...s, status: rs.status, answer: rs.answer, answer_data: rs.answer_data };
+          });
           // Clear selectedAnswers for reset steps
           setSelectedAnswers(prev => {
             const next = { ...prev };
@@ -564,19 +635,30 @@ export default function Roadmap() {
           : c
       ));
 
-      // Move to next step
-      if (next_step) {
-        // Find the index of next_step in the updated steps
-        let withNewSteps = steps.map(s => s.id === completed_step.id ? completed_step : s);
+      // Move to next step — only when the category is NOT completed.
+      // When category_completed is true the backend sometimes returns a non-null
+      // next_step pointing back to step 0 of the same category. Guarding here
+      // prevents the jump-to-first-step confusion.
+      if (next_step && !category_completed) {
+        // Find the index of next_step in the updated steps (merge, don't replace)
+        let withNewSteps = steps.map(s =>
+          s.id === completed_step.id
+            ? { ...s, status: completed_step.status, answer: completed_step.answer, answer_data: completed_step.answer_data }
+            : s
+        );
         // Remove deleted branch steps
         if (deleted_step_ids && deleted_step_ids.length > 0) {
           const deletedSet = new Set(deleted_step_ids);
           withNewSteps = withNewSteps.filter(s => !deletedSet.has(s.id));
         }
-        // Apply reset steps
+        // Apply reset steps (merge status/answer only)
         if (reset_steps && reset_steps.length > 0) {
           const resetMap = new Map(reset_steps.map(rs => [rs.id, rs]));
-          withNewSteps = withNewSteps.map(s => resetMap.has(s.id) ? resetMap.get(s.id)! : s);
+          withNewSteps = withNewSteps.map(s => {
+            if (!resetMap.has(s.id)) return s;
+            const rs = resetMap.get(s.id)!;
+            return { ...s, status: rs.status, answer: rs.answer, answer_data: rs.answer_data };
+          });
         }
         if (new_steps_added.length > 0) {
           const completedIdx = withNewSteps.findIndex(s => s.id === completed_step.id);
@@ -598,7 +680,7 @@ export default function Roadmap() {
 
       // If category completed, show banner and auto-navigate to next unlocked category
       if (category_completed) {
-        const completedLabel = CATEGORY_LABELS[selectedCategoryName] || selectedCategoryName;
+        const completedLabel = selectedCategoryData?.display_name || CATEGORY_LABELS[selectedCategoryName] || selectedCategoryName;
         const completedIcon = CATEGORY_ICONS[selectedCategoryName] || '📌';
         setCategoryCompletedBanner({ label: completedLabel, icon: completedIcon });
         try {
@@ -661,24 +743,6 @@ export default function Roadmap() {
   }
 
   const currentStep = steps[currentStepIndex] || null;
-  const rawStepBlocks: ContentBlock[] =
-    (currentStep?.content_blocks && currentStep.content_blocks.length > 0
-      ? currentStep.content_blocks
-      : []);
-
-  // Strip the first block if it's a heading that duplicates the step's metadata title
-  // (prevents double-heading for static info steps whose content starts with ## title)
-  const currentStepBlocks: ContentBlock[] = (() => {
-    const metaTitle = currentStep?.metadata_?.title as string | undefined;
-    if (metaTitle && rawStepBlocks.length > 0) {
-      const titleText = metaTitle.replace(/^Step \d+:\s*/i, '').trim();
-      const first = rawStepBlocks[0] as any;
-      if (first.type === 'heading' && (first.content || '').trim() === titleText) {
-        return rawStepBlocks.slice(1);
-      }
-    }
-    return rawStepBlocks;
-  })();
 
   return (
     <div className="chat-container roadmap-page">
@@ -686,6 +750,7 @@ export default function Roadmap() {
         notification={activeToast}
         onDismiss={dismissToast}
         onAction={(url) => router.push(url)}
+        actionLabel={bsnT.view}
       />
       {/* Category Sidebar */}
       <div className={`chat-sidebar ${isSidebarCollapsed ? 'collapsed' : ''}`}>
@@ -706,6 +771,7 @@ export default function Roadmap() {
             </div>
             <button className="btn-logout" onClick={handleLogout}>Logout</button>
           </div>
+          <LanguageSelector />
 
           <div className="roadmap-progress-header">
             <div className="roadmap-progress-label">Roadmap Progress</div>
@@ -734,14 +800,14 @@ export default function Roadmap() {
             >
               <div className="roadmap-category-row">
                 <span className="roadmap-category-icon" style={{ position: 'relative' }}>
-                  {CATEGORY_ICONS[cat.category] || '📌'}
+                  <CategoryIcon category={cat.category} svg={cat.svg} size={24} />
                   <span
                     className="roadmap-status-dot roadmap-category-icon-badge"
                     style={{ background: STATUS_COLORS[cat.status] || '#6b7280' }}
                   />
                 </span>
                 <div className="roadmap-category-info">
-                  <div className="conversation-title">{CATEGORY_LABELS[cat.category] || cat.category}</div>
+                  <div className="conversation-title">{cat.display_name || CATEGORY_LABELS[cat.category] || cat.category}</div>
                   <div className="roadmap-category-meta">
                     <span className="roadmap-category-status">
                       {`${cat.completed_steps}/${cat.total_steps} steps`}
@@ -772,7 +838,8 @@ export default function Roadmap() {
       <div className="chat-main">
         <div className="mobile-chat-header">
           <div className="mobile-chat-title">
-            {CATEGORY_ICONS[selectedCategoryName]} {CATEGORY_LABELS[selectedCategoryName] || 'Roadmap'}
+            <CategoryIcon category={selectedCategoryName} svg={selectedCategoryData?.svg} size={20} />{' '}
+            {selectedCategoryData?.display_name || CATEGORY_LABELS[selectedCategoryName] || 'Roadmap'}
           </div>
         </div>
 
@@ -793,18 +860,21 @@ export default function Roadmap() {
                 Step {currentStepIndex + 1} / {steps.length}
               </span>
               <span className="step-nav-category">
-                {CATEGORY_ICONS[selectedCategoryName]} {CATEGORY_LABELS[selectedCategoryName]}
+                <CategoryIcon category={selectedCategoryName} svg={selectedCategoryData?.svg} size={18} />{' '}
+                {selectedCategoryData?.display_name || CATEGORY_LABELS[selectedCategoryName]}
               </span>
             </div>
 
             <button
               className="step-nav-btn"
               onClick={() => goToStep(currentStepIndex + 1)}
-              disabled={isSending || steps.length === 0}
+              disabled={isSending || steps.length === 0 || (isCategoryCompleted && currentStepIndex >= steps.length - 1)}
             >
-              {currentStepIndex >= steps.length - 1
-                ? (<><span className="step-nav-label">Submit</span><span className="step-nav-arrow" aria-hidden="true">→</span></>)
-                : (<><span className="step-nav-label">Next</span><span className="step-nav-arrow" aria-hidden="true">→</span></>)
+              {isCategoryCompleted && currentStepIndex >= steps.length - 1
+                ? (<span className="step-nav-label">Done ✓</span>)
+                : currentStepIndex >= steps.length - 1
+                  ? (<><span className="step-nav-label">Submit</span><span className="step-nav-arrow" aria-hidden="true">→</span></>)
+                  : (<><span className="step-nav-label">Next</span><span className="step-nav-arrow" aria-hidden="true">→</span></>)
               }
             </button>
           </div>
@@ -839,19 +909,12 @@ export default function Roadmap() {
                     </span>
                     <span className="step-question-type">{currentStep.question_type}</span>
                   </div>
-                  {currentStep.metadata_?.title ? (
-                    <h3 className="step-title">{currentStep.metadata_.title}</h3>
+                  {currentStep.title ? (
+                    <h3 className="step-title">{currentStep.title}</h3>
                   ) : null}
-                  <div
-                    className="step-content-text"
-                    style={
-                      currentStepBlocks.length > 0
-                        ? { marginTop: '0.5rem' }
-                        : { whiteSpace: 'pre-line', marginTop: '0.5rem' }
-                    }
-                  >
-                    {currentStepBlocks.length > 0 ? (
-                      <ContentBlockRenderer blocks={currentStepBlocks} />
+                  <div className="step-content-text" style={{ marginTop: '0.5rem' }}>
+                    {currentStep.content ? (
+                      <MarkdownRenderer content={currentStep.content} />
                     ) : (
                       currentStep.question_text
                     )}
@@ -862,18 +925,9 @@ export default function Roadmap() {
                 </div>
               </div>
 
-              {/* BSN Gate for Step 5 (post_registration_info) */}
-              {currentStep.question_type === 'info' && currentStep.question_key === 'post_registration_info' && currentStep.status !== 'completed' && (
+              {/* BSN Gate for Step 5 (post_registration_info / rni_post_registration_info) */}
+              {currentStep.question_type === 'info' && (currentStep.question_key === 'post_registration_info' || currentStep.question_key === 'rni_post_registration_info') && currentStep.status !== 'completed' && (
                 <div className="step-options-inline" style={{ flexDirection: 'column' }}>
-                  {/* PDF download shortcut */}
-                  <button
-                    type="button"
-                    className="onboarding-option-btn"
-                    style={{ alignSelf: 'flex-start', marginBottom: '0.5rem', background: '#f0fdf4', color: '#15803d', border: '1px solid #86efac' }}
-                    onClick={() => window.print()}
-                  >
-                    🖨️ Download / Print this guide as PDF
-                  </button>
                   {bsnGateMessage && (
                     <div style={{ color: '#b45309', background: '#fffbeb', padding: '0.75rem', borderRadius: '0.5rem', marginBottom: '0.5rem', fontSize: '0.9rem' }}>
                       {bsnGateMessage}
@@ -881,43 +935,43 @@ export default function Roadmap() {
                   )}
                   {!bsnPromptVisible && !bsnFrozen && (
                     <button className="onboarding-option-btn" disabled style={{ opacity: 0.5, cursor: 'not-allowed' }}>
-                      ⏳ Waiting — confirm BSN when received...
+                      {bsnT.waiting}
                     </button>
                   )}
                   {bsnPromptVisible && !bsnFrozen && (
                     <>
-                      <p style={{ marginBottom: '0.5rem', fontWeight: 500 }}>Have you received your BSN?</p>
+                      <p style={{ marginBottom: '0.5rem', fontWeight: 500 }}>{bsnT.prompt}</p>
                       <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
                         <button
                           className="onboarding-option-btn"
                           onClick={() => { setBsnGateMessage(null); handleAnswerStep('bsn_received'); }}
                           disabled={isSending}
                         >
-                          ✅ Yes, I have my BSN
+                          {bsnT.yes}
                         </button>
                         <button
                           className="onboarding-option-btn"
                           onClick={() => { setBsnGateMessage(null); handleAnswerStep('bsn_not_yet'); }}
                           disabled={isSending}
                         >
-                          ⏳ Not yet
+                          {bsnT.notYet}
                         </button>
                       </div>
                     </>
                   )}
                   {bsnFrozen && (
                     <div style={{ color: '#6b7280', fontStyle: 'italic', padding: '0.5rem' }}>
-                      🔒 You must have your BSN before continuing. Select &quot;Yes, I have my BSN&quot; once it arrives.
+                      {bsnT.frozenMsg}
                       <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
                         <button
                           className="onboarding-option-btn selected"
                           onClick={() => { setBsnFrozen(false); setBsnGateMessage(null); handleAnswerStep('bsn_received'); }}
                           disabled={isSending}
                         >
-                          ✅ Yes, I have my BSN
+                          {bsnT.yes}
                         </button>
                         <button className="onboarding-option-btn" disabled style={{ opacity: 0.5 }}>
-                          ⏳ Not yet
+                          {bsnT.notYet}
                         </button>
                       </div>
                     </div>
@@ -926,7 +980,7 @@ export default function Roadmap() {
               )}
 
               {/* Acknowledge button for all other info steps (except BSN gate and summary steps) */}
-              {currentStep.question_type === 'info' && currentStep.question_key !== 'post_registration_info' && !currentStep.metadata_?.is_summary && currentStep.status !== 'completed' && (
+              {currentStep.question_type === 'info' && currentStep.question_key !== 'post_registration_info' && currentStep.question_key !== 'rni_post_registration_info' && !currentStep.metadata_?.is_summary && currentStep.status !== 'completed' && (
                 <div className="step-options-inline">
                   <button
                     className="onboarding-option-btn"
@@ -938,16 +992,45 @@ export default function Roadmap() {
                 </div>
               )}
 
-              {/* Print + continue for health/housing summary steps */}
-              {currentStep.question_type === 'info' && currentStep.metadata_?.is_summary === true && currentStep.question_key !== 'post_registration_info' && (
+              {/* Save as PDF + continue for summary steps */}
+              {currentStep.question_type === 'info' && currentStep.metadata_?.is_summary === true && (
                 <div className="step-options-inline" style={{ flexDirection: 'column', gap: '0.5rem' }}>
                   <button
                     type="button"
                     className="onboarding-option-btn"
                     style={{ alignSelf: 'flex-start', background: '#f0fdf4', color: '#15803d', border: '1px solid #86efac' }}
-                    onClick={() => window.print()}
+                    disabled={isPdfLoading}
+                    onClick={async () => {
+                      setIsPdfLoading(true);
+                      try {
+                        const token = apiClient.getAccessToken();
+                        const res = await fetch('/api/proxy/roadmap/export/step-pdf', {
+                          method: 'POST',
+                          headers: {
+                            'Content-Type': 'application/json',
+                            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                          },
+                          body: JSON.stringify({
+                            title: currentStep.title,
+                            content: currentStep.content,
+                          }),
+                        });
+                        if (!res.ok) throw new Error('PDF generation failed');
+                        const blob = await res.blob();
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `${currentStep.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.pdf`;
+                        a.click();
+                        URL.revokeObjectURL(url);
+                      } catch {
+                        alert('Could not generate PDF. Please try again.');
+                      } finally {
+                        setIsPdfLoading(false);
+                      }
+                    }}
                   >
-                    🖨️ Download / Save as PDF
+                    {isPdfLoading ? '⏳ Generating PDF…' : '⬇️ Save as PDF'}
                   </button>
                   {currentStep.status !== 'completed' && (
                     <button
