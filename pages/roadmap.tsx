@@ -41,15 +41,6 @@ const CATEGORY_ICONS: Record<string, string> = {
   job: '💼',
 };
 
-// category key → keys it depends on (must all be completed to unlock)
-const CATEGORY_DEPENDENCIES: Record<string, string[]> = {
-  health: ['municipality'],
-  housing: ['municipality'],
-  job: ['municipality'],
-  education: ['municipality'],
-  permanent_residency: ['municipality', 'language'],
-};
-
 const STATUS_COLORS: Record<string, string> = {
   locked: '#9ca3af',
   not_started: '#6b7280',
