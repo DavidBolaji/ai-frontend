@@ -832,6 +832,13 @@ export default function Chat() {
 
   const finishOnboarding = async (answers: Record<string, string>) => {
     setOnboardingQuestion(null);
+    setMessages(prev => [...prev, {
+      id: 'roadmap-creating',
+      role: 'assistant' as const,
+      content: 'Your roadmap is being created...',
+      content_blocks: [{ type: 'text' as const, content: 'Your roadmap is being created...' }],
+      isThinking: true,
+    }]);
     try {
       await wsCompleteOnboardingStream(answers);
       router.push('/roadmap');

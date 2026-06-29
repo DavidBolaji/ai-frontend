@@ -799,14 +799,9 @@ export default function Roadmap() {
                 </span>
                 <div className="roadmap-category-info">
                   <div className="conversation-title">{cat.display_name || CATEGORY_LABELS[cat.category] || cat.category}</div>
-                  <div className="roadmap-category-meta">
-                    <span className="roadmap-category-status">
-                      {`${cat.completed_steps}/${cat.total_steps} steps`}
-                    </span>
-                  </div>
                 </div>
                 <div className="roadmap-category-progress-mini">
-                  <svg viewBox="0 0 36 36" className="roadmap-ring">
+                  <svg viewBox="0 0 36 36" className={`roadmap-ring${stepsLoading && selectedCategoryId === cat.id ? ' roadmap-ring-loading' : ''}`}>
                     <path
                       className="roadmap-ring-bg"
                       d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
