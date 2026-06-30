@@ -8,7 +8,6 @@ import { ContentBlockRenderer } from '@/components/ContentBlockRenderer';
 import { MessageSkeleton, ConversationSkeleton } from '@/components/Skeleton';
 import { NotificationToast } from '@/components/NotificationToast';
 import { LanguageSelector } from '@/components/LanguageSelector';
-import { DocumentUpload } from '@/components/DocumentUpload';
 import type { ToastNotification } from '@/components/NotificationToast';
 import type {
   Conversation,
@@ -1335,13 +1334,6 @@ export default function Chat() {
               disabled={isSending || onboardingSubmitting || (onboardingActive && onboardingQuestion?.type !== 'open')}
               readOnly={onboardingActive && onboardingQuestion?.type !== 'open'}
             />
-            {mode === 'ask' && !onboardingActive && (
-              <DocumentUpload
-                disabled={isSending}
-                onComplete={(doc) => setAttachedDoc(doc)}
-                onError={(msg) => setSendError(msg)}
-              />
-            )}
             <button
               type="submit"
               className="btn-send"
