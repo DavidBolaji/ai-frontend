@@ -1,5 +1,9 @@
 import React from 'react';
-import type { ContentBlock } from '@/lib/types';
+import dynamic from 'next/dynamic';
+import type { ContentBlock, PlacesMapBlock, RouteMapBlock } from '@/lib/types';
+
+const RouteMap = dynamic(() => import('./RouteMap'), { ssr: false });
+const PlacesMap = dynamic(() => import('./PlacesMap'), { ssr: false });
 
 interface ContentBlockRendererProps {
   blocks: ContentBlock[];
@@ -109,7 +113,7 @@ function renderInlineMarkdown(text?: string): React.ReactNode {
   }
 
   const nodes: React.ReactNode[] = [];
-  const pattern = /\(\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)\)|\*\*([^*]+)\*\*|\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)|(https?:\/\/[^\s)]+)/g;
+  const pattern = /\(\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)\)|\*\*([^*]+)\*\*|\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)|(https?:\/\/[^\s)]+)|`([^`]+)`/g;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
 
@@ -161,6 +165,12 @@ function renderInlineMarkdown(text?: string): React.ReactNode {
         >
           {descriptiveLinkText(bareUrl)}
         </a>
+      );
+    } else if (match[7]) {
+      nodes.push(
+        <code key={`code-${match.index}`} className="content-inline-code">
+          {match[7]}
+        </code>
       );
     }
 
@@ -276,6 +286,40 @@ const ContentBlockItem: React.FC<{ block: ContentBlock; orderedStart?: number }>
     case 'source':
       // Source blocks are handled separately as tags
       return null;
+
+    case 'route_map': {
+      const rtBlock = block as unknown as RouteMapBlock;
+      if (!rtBlock.itineraries?.length) return null;
+      return (
+        <div className="content-block">
+          <RouteMap block={rtBlock} />
+        </div>
+      );
+    }
+
+    case 'places_map':
+      return (
+        <div className="content-block">
+          <PlacesMap block={block as unknown as PlacesMapBlock} />
+        </div>
+      );
+
+    case 'image': {
+      if (!block.url) return null;
+      return (
+        <figure className="content-block content-image">
+          <img
+            src={block.url}
+            alt={block.alt || ''}
+            className="content-image__img"
+            loading="lazy"
+          />
+          {block.caption && (
+            <figcaption className="content-image__caption">{block.caption}</figcaption>
+          )}
+        </figure>
+      );
+    }
 
     default:
       return null;

@@ -725,7 +725,7 @@ textarea {
 
 .markdown-body {
   font-size: 0.9375rem;
-  line-height: 1.75;
+  line-height: 1.8;
   color: #1a1a1a;
 }
 
@@ -736,8 +736,8 @@ textarea {
   font-weight: 600;
   line-height: 1.35;
   color: #111827;
-  margin-top: 1.4rem;
-  margin-bottom: 0.45rem;
+  margin-top: 1.6rem;
+  margin-bottom: 0.5rem;
 }
 
 .markdown-body h1 { font-size: 1.3rem; }
@@ -750,13 +750,13 @@ textarea {
 .markdown-body > :last-child  { margin-bottom: 0; }
 
 .markdown-body p {
-  margin: 0 0 0.8rem;
+  margin: 0 0 0.95rem;
 }
 
 .markdown-body ul,
 .markdown-body ol {
-  padding-left: 1.6rem;
-  margin: 0.1rem 0 0.8rem;
+  padding-left: 1.75rem;
+  margin: 0.3rem 0 0.95rem;
 }
 
 .markdown-body ul { list-style-type: disc; }
@@ -764,14 +764,24 @@ textarea {
 
 .markdown-body li {
   display: list-item;
-  margin-bottom: 0.3rem;
-  line-height: 1.7;
+  margin-bottom: 0.45rem;
+  line-height: 1.75;
 }
 
+.markdown-body li:last-child { margin-bottom: 0; }
 .markdown-body li > p { margin: 0; }
 
 .markdown-body strong { font-weight: 600; }
 .markdown-body em     { font-style: italic; }
+
+.content-inline-code {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 0.875em;
+  background: #f0f2f5;
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  color: #c7254e;
+}
 
 .markdown-body code {
   font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
@@ -802,28 +812,30 @@ textarea {
 
 .markdown-body blockquote {
   border-left: 3px solid #d1d5db;
-  padding: 0.2rem 0 0.2rem 1rem;
+  padding: 0.6rem 0 0.6rem 1.1rem;
   color: #4b5563;
-  margin: 0.1rem 0 0.8rem;
+  margin: 0.25rem 0 0.95rem;
+  background: #f9fafb;
+  border-radius: 0 4px 4px 0;
 }
 
 .markdown-body hr {
   border: none;
   border-top: 1px solid #e5e7eb;
-  margin: 1rem 0;
+  margin: 1.5rem 0;
 }
 
 .markdown-body table {
   width: 100%;
   border-collapse: collapse;
-  margin: 0.5rem 0 0.9rem;
+  margin: 0.5rem 0 0.95rem;
   font-size: 0.9rem;
 }
 
 .markdown-body th,
 .markdown-body td {
   border: 1px solid #d1d5db;
-  padding: 0.45rem 0.75rem;
+  padding: 0.55rem 0.85rem;
   text-align: left;
   vertical-align: top;
 }
@@ -1055,23 +1067,45 @@ textarea {
 
 /* The wrapper div adds only bottom spacing; elements within set their own. */
 .content-block {
-  margin-bottom: 0.8rem;
+  margin-bottom: 0.95rem;
   font-size: 0.9375rem;
-  line-height: 1.75;
+  line-height: 1.8;
   color: #1a1a1a;
 }
 
 .content-block:first-child { margin-top: 0; }
 .content-block:last-child  { margin-bottom: 0; }
 
+/* Image block */
+.content-image {
+  margin: 0.8rem 0;
+  border-radius: 0.5rem;
+  overflow: hidden;
+  border: 1px solid #e5e7eb;
+}
+.content-image__img {
+  display: block;
+  width: 100%;
+  max-height: 16rem;
+  object-fit: cover;
+}
+.content-image__caption {
+  padding: 0.35rem 0.6rem;
+  font-size: 0.78rem;
+  color: #6b7280;
+  background: #f9fafb;
+}
+
 /* Headings */
 .content-heading {
   font-weight: 600;
   line-height: 1.35;
   color: #111827;
-  margin-top: 0.4rem;
-  margin-bottom: 0.35rem;
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
 }
+
+.content-block:first-child.content-heading { margin-top: 0; }
 
 .content-heading.level-1 { font-size: 1.3rem; }
 .content-heading.level-2 { font-size: 1.15rem; }
@@ -1080,16 +1114,18 @@ textarea {
 
 /* Lists */
 .content-list {
-  padding-left: 1.6rem;
-  margin: 0;
+  padding-left: 1.75rem;
+  margin: 0.2rem 0 0.95rem;
 }
+
+.content-block:last-child .content-list { margin-bottom: 0; }
 
 .content-list.ordered  { list-style: decimal outside; }
 .content-list.unordered { list-style: disc outside; }
 
 .content-list li {
-  margin-bottom: 0.3rem;
-  line-height: 1.7;
+  margin-bottom: 0.45rem;
+  line-height: 1.75;
 }
 
 .content-list li:last-child { margin-bottom: 0; }
@@ -1097,16 +1133,17 @@ textarea {
 /* Blockquote */
 .content-quote {
   border-left: 3px solid #d1d5db;
-  padding: 0.2rem 0 0.2rem 1rem;
+  padding: 0.6rem 0 0.6rem 1.1rem;
   color: #4b5563;
-  font-style: italic;
+  background: #f9fafb;
+  border-radius: 0 4px 4px 0;
 }
 
 /* Divider */
 .content-divider {
   border: none;
   border-top: 1px solid #e5e7eb;
-  margin: 0.25rem 0;
+  margin: 1.25rem 0;
 }
 
 /* Links */
@@ -1138,7 +1175,7 @@ textarea {
 .content-table th,
 .content-table td {
   border: 1px solid #d1d5db;
-  padding: 0.45rem 0.75rem;
+  padding: 0.55rem 0.85rem;
   text-align: left;
   vertical-align: top;
 }

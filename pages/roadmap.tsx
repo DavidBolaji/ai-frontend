@@ -899,11 +899,19 @@ export default function Roadmap() {
                     <h3 className="step-title">{currentStep.title}</h3>
                   ) : null}
                   <div className="step-content-text" style={{ marginTop: '0.5rem' }}>
-                    {currentStep.content ? (
-                      <MarkdownRenderer content={currentStep.content} />
-                    ) : (
-                      currentStep.question_text
-                    )}
+                    {(() => {
+                      const blocks: ContentBlock[] | undefined =
+                        currentStep.content_blocks?.length > 0
+                          ? currentStep.content_blocks
+                          : (currentStep.metadata_?.content_blocks as ContentBlock[] | undefined);
+                      if (blocks && blocks.length > 0) {
+                        return <ContentBlockRenderer blocks={blocks} />;
+                      }
+                      if (currentStep.content) {
+                        return <MarkdownRenderer content={currentStep.content} />;
+                      }
+                      return <>{currentStep.question_text}</>;
+                    })()}
                   </div>
                   {currentStep.metadata_ && currentStep.metadata_.help && (
                     <div className="step-help-text">{currentStep.metadata_.help}</div>

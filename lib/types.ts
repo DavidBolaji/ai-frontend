@@ -1,7 +1,7 @@
 // TypeScript types matching the backend schemas
 
 export interface ContentBlock {
-  type: 'text' | 'heading' | 'list' | 'quote' | 'link' | 'table' | 'source' | 'hr';
+  type: 'text' | 'heading' | 'list' | 'quote' | 'link' | 'table' | 'source' | 'hr' | 'route_map' | 'places_map' | 'image';
   content?: string;
   level?: number;
   ordered?: boolean;
@@ -14,6 +14,94 @@ export interface ContentBlock {
   filename?: string;
   category?: string;
   similarity?: number;
+  // route_map fields
+  origin?: LatLon;
+  destination?: LatLon;
+  bounds?: { minLat: number; minLon: number; maxLat: number; maxLon: number };
+  itineraries?: RouteMapItinerary[];
+  // places_map fields
+  query?: string;
+  center?: { lat: number; lon: number };
+  places?: Place[];
+  // image fields
+  alt?: string;
+  caption?: string;
+}
+
+// ── Route map types ───────────────────────────────────────────────────────────
+
+export interface LatLon {
+  name: string;
+  lat: number | null;
+  lon: number | null;
+}
+
+export interface RouteMapLeg {
+  mode: string;
+  label: string;
+  description: string;
+  route_name: string;
+  agency: string;
+  color: string;
+  from: LatLon;
+  to: LatLon;
+  departure: string;
+  arrival: string;
+  duration_minutes: number;
+  geometry: string;
+}
+
+export interface RouteMapItinerary {
+  index: number;
+  summary: string;
+  duration_minutes: number;
+  transfers: number;
+  start_time: string;
+  end_time: string;
+  legs: RouteMapLeg[];
+}
+
+export interface RouteMapBlock {
+  type: 'route_map';
+  origin: LatLon;
+  destination: LatLon;
+  bounds: { minLat: number; minLon: number; maxLat: number; maxLon: number };
+  itineraries: RouteMapItinerary[];
+}
+
+// ── Places map types ─────────────────────────────────────────────────────────
+
+export interface Place {
+  id: string;
+  name: string;
+  address: string;
+  lat: number | null;
+  lon: number | null;
+  rating: number | null;
+  ratings_total: number | null;
+  price_level: string;
+  category: string;
+  open_now: boolean | null;
+  phone: string;
+  website: string;
+  maps_uri: string;
+  photo_url: string;
+  summary: string;
+}
+
+export interface PlacesMapBlock {
+  type: 'places_map';
+  query: string;
+  center: { lat: number; lon: number };
+  bounds: { minLat: number; minLon: number; maxLat: number; maxLon: number };
+  places: Place[];
+}
+
+export interface ImageBlock {
+  type: 'image';
+  url: string;
+  alt: string;
+  caption: string;
 }
 
 export interface User {

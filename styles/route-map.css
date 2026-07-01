@@ -1,0 +1,69 @@
+.route-map__options {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.route-map__options button {
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.route-map__options button.is-active {
+  background: #111827;
+  color: #fff;
+  border-color: #111827;
+}
+
+.route-map__canvas {
+  width: 100%;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.route-map__legend {
+  margin-top: 10px;
+  padding-left: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.route-map__legend li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.route-map__swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  flex: none;
+}
+
+.route-marker {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3);
+}
+
+.route-marker--origin {
+  background: #16a34a;
+}
+
+.route-marker--transfer {
+  background: #f59e0b;
+}
+
+.route-marker--destination {
+  background: #dc2626;
+}

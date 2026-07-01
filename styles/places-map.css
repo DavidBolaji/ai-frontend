@@ -1,0 +1,127 @@
+.places-map {
+  display: grid;
+  gap: 12px;
+}
+
+.places-map__canvas {
+  width: 100%;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.places-map__cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.places-map__cards li {
+  display: flex;
+  gap: 12px;
+  padding: 8px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  cursor: pointer;
+  background: #fff;
+}
+
+.places-map__cards li.is-active {
+  border-color: #111827;
+  box-shadow: 0 0 0 1px #111827;
+}
+
+.places-map__cards img,
+.places-map__noimg {
+  width: 92px;
+  height: 92px;
+  border-radius: 8px;
+  flex: none;
+}
+
+.places-map__cards img {
+  object-fit: cover;
+}
+
+.places-map__noimg {
+  background: #f3f4f6;
+}
+
+.places-map__info {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.places-map__info strong,
+.places-map__summary,
+.places-map__addr {
+  overflow-wrap: anywhere;
+}
+
+.places-map__meta {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  color: #374151;
+}
+
+.places-map__meta .open {
+  color: #16a34a;
+}
+
+.places-map__meta .closed {
+  color: #dc2626;
+}
+
+.places-map__summary {
+  color: #374151;
+}
+
+.places-map__addr {
+  color: #6b7280;
+}
+
+.places-map__links {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.places-marker {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #2563eb;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+  padding: 0;
+}
+
+.places-marker.is-active {
+  background: #111827;
+  transform: scale(1.12);
+}
+
+@media (max-width: 520px) {
+  .places-map__cards li {
+    align-items: flex-start;
+  }
+
+  .places-map__cards img,
+  .places-map__noimg {
+    width: 72px;
+    height: 72px;
+  }
+}
