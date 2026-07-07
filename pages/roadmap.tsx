@@ -28,6 +28,20 @@ const CATEGORY_LABELS: Record<string, string> = {
   job: 'Job & Employment',
 };
 
+const PROSE_BLOCK_TYPES = new Set<ContentBlock['type']>([
+  'text',
+  'heading',
+  'list',
+  'quote',
+  'link',
+  'table',
+  'hr',
+]);
+
+const hasProseContentBlocks = (blocks?: ContentBlock[] | null) => (
+  blocks?.some((block) => PROSE_BLOCK_TYPES.has(block.type)) ?? false
+);
+
 const CATEGORY_ICONS: Record<string, string> = {
   municipality: '🏛️',
   health: '🏥',
@@ -1135,8 +1149,13 @@ export default function Roadmap() {
                 chatMessages.map((msg) => (
                   <div key={msg.id} className={`message ${msg.role}`}>
                     <div className="message-content">
-                      {msg.content_blocks ? (
-                        <ContentBlockRenderer blocks={msg.content_blocks} />
+                      {msg.content_blocks && msg.content_blocks.length > 0 ? (
+                        <>
+                          {msg.content && !hasProseContentBlocks(msg.content_blocks) && (
+                            <MarkdownRenderer content={msg.content} />
+                          )}
+                          <ContentBlockRenderer blocks={msg.content_blocks} />
+                        </>
                       ) : (
                         msg.content
                       )}

@@ -1,9 +1,10 @@
 import React from 'react';
 import dynamic from 'next/dynamic';
-import type { ContentBlock, PlacesMapBlock, RouteMapBlock } from '@/lib/types';
+import type { ContentBlock, PlacesMapBlock, RouteMapBlock, SourcesBlock, WeatherBlock } from '@/lib/types';
 
 const RouteMap = dynamic(() => import('./RouteMap'), { ssr: false });
 const PlacesMap = dynamic(() => import('./PlacesMap'), { ssr: false });
+const WeatherCard = dynamic(() => import('./WeatherCard'), { ssr: false });
 
 interface ContentBlockRendererProps {
   blocks: ContentBlock[];
@@ -287,6 +288,25 @@ const ContentBlockItem: React.FC<{ block: ContentBlock; orderedStart?: number }>
       // Source blocks are handled separately as tags
       return null;
 
+    case 'sources': {
+      const sources = (block as SourcesBlock).sources || [];
+      if (sources.length === 0) return null;
+      return (
+        <div className="content-block answer-sources">
+          <span>Sources</span>
+          <ol>
+            {sources.map((source, i) => (
+              <li key={`${source.url}-${i}`}>
+                <a href={source.url} target="_blank" rel="noreferrer">
+                  {source.title}
+                </a>
+              </li>
+            ))}
+          </ol>
+        </div>
+      );
+    }
+
     case 'route_map': {
       const rtBlock = block as unknown as RouteMapBlock;
       if (!rtBlock.itineraries?.length) return null;
@@ -303,6 +323,18 @@ const ContentBlockItem: React.FC<{ block: ContentBlock; orderedStart?: number }>
           <PlacesMap block={block as unknown as PlacesMapBlock} />
         </div>
       );
+
+    case 'weather': {
+      const weatherBlock = block as unknown as WeatherBlock;
+      if (!weatherBlock.current && !weatherBlock.daily?.length && !weatherBlock.hourly?.length) {
+        return null;
+      }
+      return (
+        <div className="content-block">
+          <WeatherCard block={weatherBlock} />
+        </div>
+      );
+    }
 
     case 'image': {
       if (!block.url) return null;

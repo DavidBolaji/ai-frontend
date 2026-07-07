@@ -1096,6 +1096,49 @@ textarea {
   background: #f9fafb;
 }
 
+/* Sources block */
+.answer-sources {
+  border-top: 1px solid #e5e7eb;
+  margin-top: 0.75rem;
+  padding-top: 0.55rem;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: #6b7280;
+}
+
+.answer-sources > span {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #4b5563;
+}
+
+.answer-sources ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.7rem;
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.answer-sources li {
+  padding-left: 0.05rem;
+}
+
+.answer-sources a {
+  color: #2563eb;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.answer-sources a:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 /* Headings */
 .content-heading {
   font-weight: 600;

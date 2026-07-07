@@ -1,7 +1,7 @@
 // TypeScript types matching the backend schemas
 
 export interface ContentBlock {
-  type: 'text' | 'heading' | 'list' | 'quote' | 'link' | 'table' | 'source' | 'hr' | 'route_map' | 'places_map' | 'image';
+  type: 'text' | 'heading' | 'list' | 'quote' | 'link' | 'table' | 'source' | 'sources' | 'hr' | 'route_map' | 'places_map' | 'image' | 'weather';
   content?: string;
   level?: number;
   ordered?: boolean;
@@ -26,6 +26,15 @@ export interface ContentBlock {
   // image fields
   alt?: string;
   caption?: string;
+  // sources fields
+  sources?: { title: string; url: string }[];
+  // weather fields
+  location?: string;
+  lat?: number | null;
+  lon?: number | null;
+  current?: WeatherCurrent;
+  daily?: WeatherDay[];
+  hourly?: WeatherHour[];
 }
 
 // ── Route map types ───────────────────────────────────────────────────────────
@@ -102,6 +111,44 @@ export interface ImageBlock {
   url: string;
   alt: string;
   caption: string;
+}
+
+export interface SourcesBlock {
+  type: 'sources';
+  sources: { title: string; url: string }[];
+}
+
+export interface WeatherCurrent {
+  temp: number | null;
+  description: string;
+  icon: string;
+  code: number | null;
+  wind: number | null;
+}
+
+export interface WeatherDay {
+  date: string;
+  high: number | null;
+  low: number | null;
+  icon: string;
+  code: number | null;
+  description: string;
+}
+
+export interface WeatherHour {
+  time: string;
+  temp: number | null;
+  icon: string;
+}
+
+export interface WeatherBlock {
+  type: 'weather';
+  location: string;
+  lat: number | null;
+  lon: number | null;
+  current: WeatherCurrent;
+  daily: WeatherDay[];
+  hourly: WeatherHour[];
 }
 
 export interface User {

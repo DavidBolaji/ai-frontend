@@ -39,6 +39,20 @@ type SourceTagCache = Record<string, Record<string, string[]>>;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const PROSE_BLOCK_TYPES = new Set<ContentBlock['type']>([
+  'text',
+  'heading',
+  'list',
+  'quote',
+  'link',
+  'table',
+  'hr',
+]);
+
+const hasProseContentBlocks = (blocks?: ContentBlock[] | null) => (
+  blocks?.some((block) => PROSE_BLOCK_TYPES.has(block.type)) ?? false
+);
+
 function PaperPlaneIcon() {
   return (
     <svg
@@ -1141,7 +1155,12 @@ export default function Chat() {
                       </span>
                     </div>
                   ) : message.content_blocks && message.content_blocks.length > 0 ? (
-                    <ContentBlockRenderer blocks={message.content_blocks} />
+                    <>
+                      {message.content && !hasProseContentBlocks(message.content_blocks) && (
+                        <MarkdownRenderer content={message.content} />
+                      )}
+                      <ContentBlockRenderer blocks={message.content_blocks} />
+                    </>
                   ) : (
                     <>
                      <MarkdownRenderer content={message.content} />
