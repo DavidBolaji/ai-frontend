@@ -117,6 +117,9 @@ class ApiClient {
 
   private normalizeError(payload: unknown, status: number, statusText: string): ApiError {
     if (payload && typeof payload === 'object') {
+      if ('error' in payload && typeof payload.error === 'string') {
+        return { errors: [{ status: String(status), code: 'request_failed', title: 'Request failed', detail: payload.error }] };
+      }
       const jsonApiError = payload as JsonApiErrorDocument;
       if (Array.isArray(jsonApiError.errors) && jsonApiError.errors.length > 0) {
         return { errors: jsonApiError.errors };
@@ -178,6 +181,17 @@ class ApiClient {
     return !!this.accessToken;
   }
 
+  public hasValidSession(): boolean {
+    if (!this.accessToken) return false;
+    try {
+      const payload = this.accessToken.split('.')[1];
+      const claims = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')));
+      return typeof claims.exp === 'number' && claims.exp * 1000 > Date.now();
+    } catch {
+      return false;
+    }
+  }
+
   public getAccessToken(): string | null {
     return this.accessToken;
   }
@@ -193,7 +207,8 @@ class ApiClient {
   private async request<T>(
     endpoint: string,
     options: RequestInit = {},
-    retry = true
+    retry = true,
+    baseUrl = API_BASE_URL
   ): Promise<T> {
     const lang = getUserLanguage();
     const deviceLang =
@@ -216,7 +231,7 @@ class ApiClient {
 
     let response: Response;
     try {
-      response = await fetch(`${API_BASE_URL}${endpoint}`, {
+      response = await fetch(`${baseUrl}${endpoint}`, {
         ...options,
         headers,
         signal: controller.signal,
@@ -240,7 +255,11 @@ class ApiClient {
     if (response.status === 401 && retry && !endpoint.includes('/auth/')) {
       await this.handleUnauthorized();
       // Retry the request once with new token
-      return this.request<T>(endpoint, options, false);
+      return this.request<T>(endpoint, options, false, baseUrl);
+    }
+
+    if (response.status === 401 && baseUrl === '/api/knowledge') {
+      this.logout();
     }
 
     if (!response.ok) {
@@ -265,6 +284,10 @@ class ApiClient {
 
     const payload = (await response.json()) as JsonApiDocument<T> | T;
     return this.unwrapData<T>(payload);
+  }
+
+  public async readKnowledge(params: Record<string, string>): Promise<any> {
+    return this.request(`?${new URLSearchParams(params)}`, {}, true, '/api/knowledge');
   }
 
   private async streamRequest<T>(
