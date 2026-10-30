@@ -18,7 +18,7 @@ export default function Login() {
 
     try {
       await apiClient.login({ phoneNumber, password });
-      router.replace('/chat');
+      router.replace('/knowledge');
     } catch (err) {
       const apiError = err as ApiError;
       setError(
@@ -33,8 +33,8 @@ export default function Login() {
   return (
     <div className="auth-container">
       <div className="auth-card">
-        <h1 className="auth-title">Welcome Back</h1>
-        <p className="auth-subtitle">Sign in to continue your conversation</p>
+        <h1 className="auth-title">Knowledge review</h1>
+        <p className="auth-subtitle">Sign in with your staff account</p>
 
         {error && <div className="error-message">{error}</div>}
 

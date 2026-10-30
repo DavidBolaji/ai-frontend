@@ -20,7 +20,7 @@ export default function Register() {
 
     try {
       await apiClient.register({ fname, lname, phoneNumber, password });
-      router.replace('/chat');
+      router.replace('/knowledge');
     } catch (err) {
       const apiError = err as ApiError;
       setError(
