@@ -13,20 +13,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   } catch {
     return res.status(503).json({ error: 'Configure a valid HTTPS backend API URL.' });
   }
-  const { operation, status, before, id, offset, sort } = req.query;
+  const { operation, status, before, id, offset, sort, signal } = req.query;
   let endpoint: string;
   if (operation === 'gaps') endpoint = '/admin/kaya/knowledge/gaps';
   else if (operation === 'gap' && typeof id === 'string' && /^[0-9a-f-]{36}$/i.test(id)) endpoint = `/admin/kaya/knowledge/gaps/${id}`;
+  else if (operation === 'messages') endpoint = '/admin/kaya/feedback/messages';
   else if (operation === 'feedback') endpoint = '/admin/kaya/feedback/reports';
   else return res.status(400).json({ error: 'Unsupported read operation.' });
   if ((status !== undefined && typeof status !== 'string') || (before !== undefined && (typeof before !== 'string' || before.length > 256))) return res.status(400).json({ error: 'Invalid filters.' });
   if (offset !== undefined && (typeof offset !== 'string' || !/^\d{1,7}$/.test(offset) || Number(offset) > 1000000)) return res.status(400).json({ error: 'Invalid page offset.' });
   if (sort !== undefined && sort !== 'newest' && sort !== 'oldest') return res.status(400).json({ error: 'Invalid date sort.' });
+  if (signal !== undefined && (typeof signal !== 'string' || !/^[a-z][a-z0-9_]{0,63}$/.test(signal))) return res.status(400).json({ error: 'Invalid signal.' });
   const query = new URLSearchParams();
+  if (signal && operation === 'gaps') query.set('signal', signal);
   if (sort) query.set('sort', sort);
   if (operation === 'gaps' && offset) query.set('offset', offset);
   if (status) query.set('status', status);
-  if (before && operation === 'feedback') query.set('before', before);
+  if (before && (operation === 'feedback' || operation === 'messages')) query.set('before', before);
   if (operation !== 'gap') query.set('limit', '25');
   try {
     const upstream = await fetch(`${base.replace(/\/$/, '')}${endpoint}?${query}`, {

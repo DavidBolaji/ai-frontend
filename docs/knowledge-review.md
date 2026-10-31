@@ -1,4 +1,4 @@
-# Hosted knowledge review
+# Easumi knowledge review
 
 The Next.js workspace at `/knowledge` reads through a same-origin Next.js API route, which forwards the signed-in user's bearer token to FastAPI. Python subprocesses, database profiles, and database tunnels are not needed by the frontend.
 
@@ -20,10 +20,28 @@ Visit http://127.0.0.1:3015/knowledge.
 
 ## Read endpoints
 
-- `GET /admin/kaya/knowledge/gaps?status=open&limit=25&offset=0`
+- `GET /admin/kaya/knowledge/gaps?status=open&limit=25&offset=0&signal=missing_knowledge`
 - `GET /admin/kaya/knowledge/gaps/{gap_id}`
-- `GET /admin/kaya/feedback/reports?status=quarantined&limit=25&before=...` (existing)
+- `GET /admin/kaya/feedback/reports?status=quarantined&limit=25&before=...`
+- `GET /admin/kaya/feedback/messages?limit=25&before=...`
 
 All paths above are relative to `/api/v1`. Gap statuses are open, researching, answered, and rejected. Feedback uses the existing status filters and cursor pagination. Search covers loaded records. Both lists show 25 records per page with Previous/Next controls. Gaps use an offset; feedback uses cursors. The record list and detail panel scroll independently. User correction claims are explicitly unverified.
 
-The Next.js `/api/knowledge` route accepts only GET operations `gaps`, `gap`, and `feedback`. Credentials are forwarded only to the configured backend, redirects are rejected, and responses are not cached. Promotion, review mutations, and ingestion are not exposed by this route or workspace. Existing backend mutation endpoints are unchanged.
+Both lists return `meta.total`, the number of records in the selected status rather than on the page. The first summary card and the `Page n of m` label read it; when a backend does not send it they fall back to `—` and a page number alone.
+
+## What the detail panel shows
+
+The detail panel follows the recorded request through review to delivery:
+
+- **Question understood in context** — the retrieval question, falling back to the original question.
+- **Context** — municipality, topic, language and supported user profile choices, when saved. Empty fields are omitted.
+- **Validator checks** — recorded feedback on the initial draft and later checks, plus the final validation outcome. Draft issues may have been corrected before delivery.
+- **Sources** — internal record references and captured external web URLs, before the final answer.
+- **Final answer** — the stored assistant message, redacted by the backend.
+- **Reader feedback** — ratings, comments, and detected corrections. Standalone message feedback is available separately from feedback reports.
+
+Signal badges appear with explanations beside the request, evidence, validation, or final answer section where they apply. The broad `knowledge_gap` signal is available as a filter but is not repeated as a badge. Signal filters run on the backend and apply equally to page rows and totals. Gap capture remains unchanged: a recorded signal does not necessarily mean the delivered answer still has a knowledge gap.
+
+Raw diagnostics are excluded from reviewer responses. Missing source or answer information is identified without reconstructing it. User context capture applies to new turns; historical records can lack these fields.
+
+The Next.js `/api/knowledge` route accepts only GET operations `gaps`, `gap`, `feedback`, and `messages`. Credentials are forwarded only to the configured backend, redirects are rejected, and responses are not cached. Promotion, review mutations, and ingestion are not exposed by this route or workspace. Existing backend mutation endpoints are unchanged.
