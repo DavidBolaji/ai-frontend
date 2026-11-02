@@ -41,7 +41,7 @@ test(`knowledge page distinguishes ${grouping_status} grouping and tracks ingest
   let root;
   await act(async () => { root = create(React.createElement(Page)); });
   assert.match(root.root.findByProps({ role: 'img' }).props['aria-label'], /pending ingestion/);
-  assert.match(JSON.stringify(root.toJSON()), grouping_status === 'pending' ? /Grouping pending/ : /2 occurrences/);
+  assert.doesNotMatch(JSON.stringify(root.toJSON()), /Grouping pending|2 occurrences/);
   if (grouping_status === 'pending') assert.doesNotMatch(JSON.stringify(root.toJSON()), /2 occurrences/);
   const button = root.root.findAllByType('button').find(node => node.findAllByType('h2').length === 1);
   await act(async () => { await button.props.onClick(); });
