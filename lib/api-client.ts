@@ -178,6 +178,17 @@ class ApiClient {
     return !!this.accessToken;
   }
 
+  public hasValidSession(): boolean {
+    if (!this.accessToken) return false;
+    try {
+      const payload = this.accessToken.split('.')[1];
+      const claims = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')));
+      return typeof claims.exp === 'number' && claims.exp * 1000 > Date.now();
+    } catch {
+      return false;
+    }
+  }
+
   public getAccessToken(): string | null {
     return this.accessToken;
   }
@@ -193,7 +204,9 @@ class ApiClient {
   private async request<T>(
     endpoint: string,
     options: RequestInit = {},
-    retry = true
+    retry = true,
+    baseUrl = API_BASE_URL,
+    unwrap = true
   ): Promise<T> {
     const lang = getUserLanguage();
     const deviceLang =
@@ -216,7 +229,7 @@ class ApiClient {
 
     let response: Response;
     try {
-      response = await fetch(`${API_BASE_URL}${endpoint}`, {
+      response = await fetch(`${baseUrl}${endpoint}`, {
         ...options,
         headers,
         signal: controller.signal,
@@ -240,7 +253,11 @@ class ApiClient {
     if (response.status === 401 && retry && !endpoint.includes('/auth/')) {
       await this.handleUnauthorized();
       // Retry the request once with new token
-      return this.request<T>(endpoint, options, false);
+      return this.request<T>(endpoint, options, false, baseUrl, unwrap);
+    }
+
+    if (response.status === 401 && baseUrl === '/api/knowledge') {
+      this.logout();
     }
 
     if (!response.ok) {
@@ -264,7 +281,28 @@ class ApiClient {
     }
 
     const payload = (await response.json()) as JsonApiDocument<T> | T;
-    return this.unwrapData<T>(payload);
+    return unwrap ? this.unwrapData<T>(payload) : payload as T;
+  }
+
+  public async submitKnowledgeAnswer(id: string, answer: string, key: string, source: 'gap' | 'feedback' | 'vote' = 'gap'): Promise<any> {
+    const resource = await this.request<any>(`?${new URLSearchParams({ reviewOperation: 'resolve', sourceId: id, sourceKind: source })}`, {
+      method: 'POST', headers: { Accept: 'application/vnd.api+json', 'Idempotency-Key': key },
+      body: this.wrapBody('knowledge-resolutions', { answer }),
+    }, true, '/api/knowledge');
+    return { id: resource.id, ...resource.attributes };
+  }
+
+  public async readKnowledge(params: Record<string, string>): Promise<any> {
+    const names: Record<string, string> = { operation: 'reviewOperation', id: 'sourceId', source: 'sourceKind', status: 'filter[status]', signal: 'filter[signal]', offset: 'page[offset]', before: 'page[before]' };
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value) query.set(names[key] || key, key === 'sort' ? (value === 'oldest' ? 'created_at' : '-created_at') : value);
+    }
+    const doc = await this.request<any>(`?${query}`, { headers: { Accept: 'application/vnd.api+json' } }, true, '/api/knowledge', false);
+    const record = (data: any) => data ? { id: data.id, ...data.attributes } : null;
+    if (params.operation === 'resolutionLatest') return { resolution: record(doc.data) };
+    if (Array.isArray(doc.data)) return { [['gaps', 'groups', 'occurrences'].includes(params.operation) ? 'gaps' : 'reports']: doc.data.map(record), meta: doc.meta || {} };
+    return record(doc.data);
   }
 
   private async streamRequest<T>(
