@@ -81,13 +81,14 @@ is independent of this frontend. See the backend walkthrough for staging and
 production rollout URLs, worker lifecycle, and monitoring commands.
 
 Question grouping now appears in System Detected Gap. Equivalent phrasings share
-a card, with an occurrence count. Open **View original questions** to inspect each
-original question and its own status, evidence and submission. Grouping preserves
-all original records. See [the stage-by-stage backend walkthrough](../../ai-platform/docs/one-step-knowledge-resolution.md#stage-8--group-differently-worded-questions-going-forward-and-historically)
+a card. Gap cards carry no status or occurrence badge; open **View original
+questions** to inspect each original question and its own status, evidence and
+submission. Status badges remain on User feedback and Voting feedback cards.
+Grouping preserves all original records. See [the stage-by-stage backend walkthrough](../../ai-platform/docs/one-step-knowledge-resolution.md#stage-8--group-differently-worded-questions-going-forward-and-historically)
 for matching rules, local commands and the staging/production backfill runbook.
 
-An occurrence awaiting grouping is labelled **Grouping pending**. Its temporary
-card does not represent a confirmed single-occurrence group. Historical records
+Gap cards do not label an occurrence that is still awaiting grouping, so a card
+on its own does not represent a confirmed single-occurrence group. Historical records
 need the backend backfill; verify its final `remaining` count is zero, then use
 **Refresh** in the dashboard. Local backfill verification and the Koggenland BSN
 example are recorded in the backend walkthrough linked above.
