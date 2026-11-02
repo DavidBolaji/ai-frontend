@@ -2,6 +2,7 @@ import { useState, FormEvent } from 'react';
 import { useRouter } from 'next/router';
 import Link from 'next/link';
 import { apiClient } from '@/lib/api-client';
+import { loginDestination } from '@/lib/login-destination';
 import type { ApiError } from '@/lib/types';
 
 export default function Login() {
@@ -18,7 +19,7 @@ export default function Login() {
 
     try {
       await apiClient.login({ phoneNumber, password });
-      router.replace('/chat');
+      router.replace(loginDestination(router.query.next));
     } catch (err) {
       const apiError = err as ApiError;
       setError(
