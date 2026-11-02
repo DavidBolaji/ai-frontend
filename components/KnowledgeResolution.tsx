@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { apiClient } from '@/lib/api-client';
+import styles from '@/styles/knowledge.module.css';
 import type { ApiError } from '@/lib/types';
 
 export type Resolution = { id: string; status: string; attempts: number; answer?: string; error?: string | null };
@@ -84,17 +85,28 @@ export default function KnowledgeResolution({ sourceId, source = 'gap', onStatus
     }
   }
 
-  const active = resolution && !terminal.has(resolution.status);
+  const active = Boolean(resolution && !terminal.has(resolution.status));
+  const written = answer.trim().length;
+  // The button is disabled for several different reasons; say which one applies,
+  // except while the status line below is already explaining the wait.
+  const hint = submitting || active ? '' : loading ? 'Checking for an existing answer…'
+    : !written ? 'Write the reviewed answer to enable submission.'
+    : written >= 4000 ? `${5000 - written} characters left` : '';
   return <section aria-label="Resolve knowledge record">
     <h3>Provide the correct answer</h3>
     <form onSubmit={submit}>
       <label htmlFor={`answer-${sourceId}`}>Reviewed answer</label>
       <textarea id={`answer-${sourceId}`} value={answer} onChange={e => { dirty.current = true; setAnswer(e.target.value); }}
-        maxLength={5000} rows={5} required disabled={submitting || Boolean(active)}
+        maxLength={5000} rows={5} required disabled={submitting || active}
         style={{ width: '100%', boxSizing: 'border-box', margin: '8px 0', padding: 12, borderRadius: 8, font: 'inherit' }} />
-      <button type="submit" disabled={loading || submitting || Boolean(active) || !answer.trim()}>
-        {submitting ? 'Submitting…' : 'Submit'}
-      </button>
+      <div className={styles.resolveActions}>
+        <button type="submit" className={styles.submit} disabled={loading || submitting || active || !written}
+          aria-describedby={hint ? `submit-hint-${sourceId}` : undefined}>
+          {submitting && <span className={styles.submitSpinner} aria-hidden="true" />}
+          {submitting ? 'Submitting…' : active ? 'Submitted' : 'Submit answer'}
+        </button>
+        {hint && <p className={styles.resolveHint} id={`submit-hint-${sourceId}`}>{hint}</p>}
+      </div>
     </form>
     {resolution && <p role="status">{messages[resolution.status] || 'Processing…'}{resolution.attempts > 0 && !terminal.has(resolution.status) ? ' Retrying automatically.' : ''}</p>}
     {error && <p role="alert">{error}</p>}

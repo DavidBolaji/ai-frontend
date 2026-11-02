@@ -15,7 +15,7 @@ function setup(apiClient) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
   }).outputText;
   vm.runInNewContext(code, {
-    exports, require: id => id === '@/lib/api-client' ? { apiClient } : require(id),
+    exports, require: id => id === '@/lib/api-client' ? { apiClient } : id.includes('module.css') ? { default: {} } : require(id),
     crypto: require('node:crypto').webcrypto,
     setTimeout: fn => { timers.set(++nextTimer, fn); return nextTimer; },
     clearTimeout: id => timers.delete(id),
