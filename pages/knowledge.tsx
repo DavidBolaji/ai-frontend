@@ -211,6 +211,11 @@ function activeSignals(record: RecordData): string[] {
   if (!record.signals || typeof record.signals !== 'object' || Array.isArray(record.signals)) return [];
   return Object.entries(record.signals).filter(([, value]) => value === true).map(([name]) => name);
 }
+function rewriteOnly(record: RecordData): boolean {
+  const signals = activeSignals(record);
+  return signals.length === 1 && signals[0] === 'validator_revise'
+    && (!record.reason || record.reason === 'validator_revise');
+}
 const gapSignals = ['knowledge_gap', 'missing_knowledge', 'insufficient_retrieval', 'conflicting_evidence', 'empty_retrieval', 'unresolved_request', 'validator_revise', 'low_confidence', 'answered_by_rag', 'answered_by_bedrock', 'answered_by_external', 'answered_by_unresolved'];
 // A gap's stored reason is the first signal recorded for the turn
 // (reason = next(iter(signals)) in kaya_gap_repo). Related signals say the same
@@ -335,7 +340,8 @@ export default function Knowledge() {
     catch (err) { if (version === selectionVersion.current) setError((err as Error).message); }
     finally { if (version === selectionVersion.current) setDetailLoading(false); }
   }
-  const filtered = records.filter(record => JSON.stringify(record).toLowerCase().includes(query.toLowerCase()));
+  const filtered = records.filter(record => (tab !== 'gaps' || !rewriteOnly(record))
+    && JSON.stringify(record).toLowerCase().includes(query.toLowerCase()));
   const statuses = tab === 'messages' ? ['recorded'] : tab === 'gaps' ? ['open', 'researching', 'answered', 'rejected'] : ['quarantined', 'ignored', 'promoted', 'merged', 'closed'];
   const pages = total === null ? null : Math.max(1, Math.ceil(total / 25));
   if (!authReady) return <main className={styles.workspace}><p role="status">Redirecting to sign in…</p></main>;

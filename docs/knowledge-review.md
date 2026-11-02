@@ -92,3 +92,9 @@ on its own does not represent a confirmed single-occurrence group. Historical re
 need the backend backfill; verify its final `remaining` count is zero, then use
 **Refresh** in the dashboard. Local backfill verification and the Koggenland BSN
 example are recorded in the backend walkthrough linked above.
+
+The System Detected Gap list hides records whose only active signal is
+`validator_revise` (draft rewritten). Records with additional signals, including
+missing knowledge, remain visible. This is a frontend display filter; stored
+reports and backend pagination totals are unchanged, so pages can contain fewer
+than 25 visible cards. User feedback and Voting feedback are not filtered.

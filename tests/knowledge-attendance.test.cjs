@@ -22,6 +22,9 @@ test(`knowledge page distinguishes ${grouping_status} grouping and tracks ingest
   const indicator = compile('components/ResolutionIndicator.tsx', require, timers);
   const resolution = { id: 'job', status: 'accepted', attempts: 0 };
   const record = { id: 'gap', question: 'A question', status: 'open', resolution, grouping_status, occurrence_count: 2 };
+  const rewrite = { id: 'rewrite', question: 'Rewrite only question', reason: 'validator_revise', signals: { validator_revise: true, knowledge_gap: false } };
+  const mixed = { id: 'mixed', question: 'Rewrite with missing knowledge', reason: 'validator_revise', signals: { validator_revise: true, knowledge_gap: true } };
+  const unknown = { id: 'unknown', question: 'Rewrite with unknown signal', signals: { validator_revise: true, future_signal: true } };
   const router = { replace() {} };
   let formProps;
   const modules = {
@@ -34,7 +37,7 @@ test(`knowledge page distinguishes ${grouping_status} grouping and tracks ingest
     '@/components/KnowledgeResolution': { default: props => { formProps = props; return React.createElement('div', { 'data-form': true }); } },
     '@/lib/api-client': { apiClient: {
       hasValidSession: () => true,
-      readKnowledge: async params => params.operation === 'groups' ? { gaps: [record], meta: { total: 1 } } : record,
+      readKnowledge: async params => params.operation === 'groups' ? { gaps: [record, rewrite, mixed, unknown], meta: { total: 4 } } : record,
     } },
   };
   const { default: Page } = compile('pages/knowledge.tsx', id => modules[id] || require(id), timers);
@@ -42,6 +45,9 @@ test(`knowledge page distinguishes ${grouping_status} grouping and tracks ingest
   await act(async () => { root = create(React.createElement(Page)); });
   assert.match(root.root.findByProps({ role: 'img' }).props['aria-label'], /pending ingestion/);
   assert.doesNotMatch(JSON.stringify(root.toJSON()), /Grouping pending|2 occurrences/);
+  assert.doesNotMatch(JSON.stringify(root.toJSON()), /Rewrite only question/);
+  assert.match(JSON.stringify(root.toJSON()), /Rewrite with missing knowledge/);
+  assert.match(JSON.stringify(root.toJSON()), /Rewrite with unknown signal/);
   if (grouping_status === 'pending') assert.doesNotMatch(JSON.stringify(root.toJSON()), /2 occurrences/);
   const button = root.root.findAllByType('button').find(node => node.findAllByType('h2').length === 1);
   await act(async () => { await button.props.onClick(); });
