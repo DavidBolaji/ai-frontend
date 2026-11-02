@@ -352,7 +352,7 @@ export default function Knowledge() {
       <div className={styles.environment}><p><button type="button" className={styles.signOut} onClick={() => apiClient.logout()}>Sign out</button></p></div>
     </aside>
     <main className={styles.main}>
-      <header className={styles.header}><div><p className={styles.eyebrow}>EASUMI / QUALITY & INSIGHTS</p><h1>{tab === 'gaps' ? 'System Detected Gap' : tab === 'messages' ? 'Voting feedback' : 'User feedback'}</h1><p>{tab === 'gaps' ? 'Questions with the same meaning are grouped. Open a group to see each occurrence.' : 'Understand reported answers and the feedback behind them.'}</p></div><button className={styles.refresh} onClick={() => refresh(value => value + 1)} disabled={loading}>↻ Refresh</button></header>
+      <header className={styles.header}><div><p className={styles.eyebrow}>EASUMI / QUALITY & INSIGHTS</p><h1>{tab === 'gaps' ? 'System Detected Gap' : tab === 'messages' ? 'Voting feedback' : 'User feedback'}</h1><p>{tab === 'gaps' ? 'Questions Easumi could not answer well.' : tab === 'messages' ? 'How readers rated answers.' : 'Answers people reported as wrong.'}</p></div><button className={styles.refresh} onClick={() => refresh(value => value + 1)} disabled={loading}>↻ Refresh</button></header>
       {/* Count cards hidden in the UI, kept for reference:
       <div className={styles.summary}><div><strong>{total === null ? '—' : total.toLocaleString('en-GB')}</strong><span>{status} records in total</span></div><div><strong>{filtered.length}</strong><span>{query ? 'Matching your search' : 'Shown on this page'}</span></div><div><strong>API</strong><span>Backend connection</span></div></div>
       */}
