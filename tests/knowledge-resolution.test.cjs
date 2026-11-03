@@ -55,7 +55,10 @@ test('single submission waits for confirmed availability and blocks repeated cli
   status = 'available';
   await act(async () => { const [id, fn] = timers.entries().next().value; timers.delete(id); await fn(); });
   assert.match(text(root), /Answer is available in the system/);
-  assert.equal(root.root.findByType('textarea').props.disabled, false);
+  assert.equal(root.root.findByType('textarea').props.disabled, true);
+  assert.equal(root.root.findByType('button').props.disabled, true);
+  await act(async () => { await root.root.findByType('form').props.onSubmit({ preventDefault() {} }); });
+  assert.equal(calls, 1);
   act(() => root.unmount());
   assert.equal(timers.size, 0);
 });
@@ -146,5 +149,7 @@ test('reopening restores the saved answer in the textarea', async () => {
   let root;
   await act(async () => { root = renderer.create(React.createElement(Component, { sourceId: 'gap' })); });
   assert.equal(root.root.findByType('textarea').props.value, 'Previously reviewed answer');
+  assert.equal(root.root.findByType('textarea').props.disabled, true);
+  assert.equal(root.root.findByType('button').props.disabled, true);
   act(() => root.unmount());
 });

@@ -65,7 +65,7 @@ export default function KnowledgeResolution({ sourceId, source = 'gap', onStatus
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
-    if (locked.current || !answer.trim()) return;
+    if (locked.current || loading || resolution?.status === 'available' || active || !answer.trim()) return;
     locked.current = true;
     setSubmitting(true);
     setError('');
@@ -86,10 +86,11 @@ export default function KnowledgeResolution({ sourceId, source = 'gap', onStatus
   }
 
   const active = Boolean(resolution && !terminal.has(resolution.status));
+  const available = resolution?.status === 'available';
   const written = answer.trim().length;
   // The button is disabled for several different reasons; say which one applies,
   // except while the status line below is already explaining the wait.
-  const hint = submitting || active ? '' : loading ? 'Checking for an existing answer…'
+  const hint = submitting || active || available ? '' : loading ? 'Checking for an existing answer…'
     : !written ? 'Write the reviewed answer to enable submission.'
     : written >= 4000 ? `${5000 - written} characters left` : '';
   return <section aria-label="Resolve knowledge record">
@@ -97,13 +98,14 @@ export default function KnowledgeResolution({ sourceId, source = 'gap', onStatus
     <form onSubmit={submit}>
       <label htmlFor={`answer-${sourceId}`}>Reviewed answer</label>
       <textarea id={`answer-${sourceId}`} value={answer} onChange={e => { dirty.current = true; setAnswer(e.target.value); }}
-        maxLength={5000} rows={5} required disabled={submitting || active}
+        maxLength={5000} rows={5} required disabled={loading || submitting || active || available}
+        className={styles.reviewedAnswer}
         style={{ width: '100%', boxSizing: 'border-box', margin: '8px 0', padding: 12, borderRadius: 8, font: 'inherit' }} />
       <div className={styles.resolveActions}>
-        <button type="submit" className={styles.submit} disabled={loading || submitting || active || !written}
+        <button type="submit" className={styles.submit} disabled={loading || submitting || active || available || !written}
           aria-describedby={hint ? `submit-hint-${sourceId}` : undefined}>
           {submitting && <span className={styles.submitSpinner} aria-hidden="true" />}
-          {submitting ? 'Submitting…' : active ? 'Submitted' : 'Submit answer'}
+          {submitting ? 'Submitting…' : active || available ? 'Submitted' : 'Submit answer'}
         </button>
         {hint && <p className={styles.resolveHint} id={`submit-hint-${sourceId}`}>{hint}</p>}
       </div>

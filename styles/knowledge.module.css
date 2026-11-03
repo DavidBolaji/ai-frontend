@@ -114,3 +114,4 @@
 @keyframes submitSpin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .submit { transition: none; } .submitSpinner { animation-duration: 2.4s; } }
 @media (max-width: 650px) { .submit { width: 100%; } .resolveActions { gap: 10px; } }
+.reviewedAnswer:disabled { background: #eef2f0; color: #77847e; border: 1px solid #dce4df; cursor: not-allowed; }
