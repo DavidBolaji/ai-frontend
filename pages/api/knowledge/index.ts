@@ -1,4 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
+import { MAX_SOURCE_URLS, MAX_URL_LENGTH, urlProblem } from '@/lib/source-urls';
 
 export const config = { api: { bodyParser: false } };
 const mediaType = 'application/vnd.api+json';
@@ -106,9 +107,34 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (body.data.type !== 'knowledge-resolutions') return failure(res, 409, 'Expected resource type knowledge-resolutions.', '/data/type');
     if ('id' in body.data || 'lid' in body.data) return failure(res, 403, 'Resolution IDs are assigned by the server.', '/data/id');
     const attrs = body.data.attributes;
-    if (!attrs || typeof attrs !== 'object' || Array.isArray(attrs) || typeof attrs.answer !== 'string' || !attrs.answer.trim() || attrs.answer.length > 5000 || Object.keys(attrs).some(k => k !== 'answer'))
-      return failure(res, 422, 'Enter an answer of at most 5,000 characters. Only the answer attribute is accepted.', '/data/attributes/answer');
-    body = { data: { type: 'knowledge-resolutions', attributes: { answer: attrs.answer } } };
+    if (!attrs || typeof attrs !== 'object' || Array.isArray(attrs) || typeof attrs.answer !== 'string' || !attrs.answer.trim() || Array.from(attrs.answer).length > 5000 || Object.keys(attrs).some(k => !['answer', 'source_url', 'source_urls', 'action_url', 'action_label'].includes(k)))
+      return failure(res, 422, 'Enter an answer of at most 5,000 characters. Use the optional source and action fields for links.', '/data/attributes/answer');
+    for (const field of ['source_url', 'action_url']) {
+      if (attrs[field] === undefined || attrs[field] === null || attrs[field] === '') continue;
+      if (typeof attrs[field] !== 'string' || attrs[field].length > MAX_URL_LENGTH) return failure(res, 422, 'URLs must contain at most 2,000 characters.', `/data/attributes/${field}`);
+      const problem = urlProblem(attrs[field]);
+      if (problem) return failure(res, 422, problem, `/data/attributes/${field}`);
+    }
+    if (attrs.source_urls !== undefined && attrs.source_urls !== null) {
+      if (!Array.isArray(attrs.source_urls) || attrs.source_urls.length > MAX_SOURCE_URLS)
+        return failure(res, 422, `Send source_urls as a list of at most ${MAX_SOURCE_URLS} URLs.`, '/data/attributes/source_urls');
+      const seen = new Set<string>();
+      const cleaned: string[] = [];
+      for (let index = 0; index < attrs.source_urls.length; index += 1) {
+        const entry = attrs.source_urls[index];
+        if (typeof entry !== 'string') return failure(res, 422, 'Each source URL must be text.', `/data/attributes/source_urls/${index}`);
+        const trimmed = entry.trim();
+        if (!trimmed) continue;
+        if (trimmed.length > MAX_URL_LENGTH) return failure(res, 422, 'URLs must contain at most 2,000 characters.', `/data/attributes/source_urls/${index}`);
+        const problem = urlProblem(trimmed);
+        if (problem) return failure(res, 422, problem, `/data/attributes/source_urls/${index}`);
+        if (!seen.has(trimmed)) { seen.add(trimmed); cleaned.push(trimmed); }
+      }
+      if (cleaned.length) attrs.source_urls = cleaned; else delete attrs.source_urls;
+    }
+    if (attrs.action_label !== undefined && attrs.action_label !== null && (typeof attrs.action_label !== 'string' || Array.from(attrs.action_label).length > 200 || (attrs.action_label.trim() && !attrs.action_url)))
+      return failure(res, 422, 'Use an action label of at most 200 characters with an action URL.', '/data/attributes/action_label');
+    body = { data: { type: 'knowledge-resolutions', attributes: attrs } };
   }
   const query = new URLSearchParams();
   const status = req.query['filter[status]'];

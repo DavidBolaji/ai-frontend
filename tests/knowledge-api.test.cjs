@@ -1,6 +1,26 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const ts = require('typescript');
+
+// `@/lib/*` is a tsconfig path alias Node cannot resolve, so shared TypeScript
+// modules are transpiled into this harness on demand.
+function requireAliased(id, fallback) {
+  if (id.startsWith('@/lib/')) {
+    const file = `lib/${id.slice('@/lib/'.length)}.ts`;
+    if (fs.existsSync(file)) {
+      const exports = {};
+      vm.runInNewContext(
+        ts.transpileModule(fs.readFileSync(file, 'utf8'), {
+          compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+        }).outputText,
+        { exports, URL, console },
+      );
+      return exports;
+    }
+  }
+  return fallback(id);
+}
+
 const fs = require('node:fs');
 const vm = require('node:vm');
 const { Readable } = require('node:stream');
@@ -13,7 +33,7 @@ const source = ts.transpileModule(fs.readFileSync('pages/api/knowledge/index.ts'
 }).outputText;
 function setup(fetch, base = 'https://backend.example/api/v1') {
   const exports = {};
-  vm.runInNewContext(source, { exports, fetch, process: { env: { API_BASE_URL: base } }, URL, URLSearchParams, AbortSignal, Buffer });
+  vm.runInNewContext(source, { exports, fetch, process: { env: { API_BASE_URL: base } }, URL, URLSearchParams, AbortSignal, Buffer, require: id => requireAliased(id, require) });
   const res = { code: 200, body: null, headers: {}, setHeader(k, v) { this.headers[k] = v; }, status(code) { this.code = code; return this; }, json(body) { this.body = body; return this; }, send(body) { this.body = JSON.parse(body); return this; }, end() { return this; } };
   return { handler: exports.default, res, config: exports.config };
 }
@@ -131,7 +151,7 @@ test('shared client sends the JSON:API envelope and reconstructs view data with 
   const exports = {};
   const calls = [];
   vm.runInNewContext(compiled, {
-    exports, require: () => ({ getUserLanguage: () => 'en' }), URLSearchParams, AbortController, setTimeout, clearTimeout,
+    exports, require: id => requireAliased(id, () => ({ getUserLanguage: () => 'en' })), URL, URLSearchParams, AbortController, setTimeout, clearTimeout,
     fetch: async (url, options) => {
       calls.push({ url, options });
       return { ok: true, status: 200, json: async () => calls.length === 1 ? doc() : { jsonapi: { version: '1.1' }, data: [{ type: 'knowledge-gaps', id, attributes: { question: 'Question' } }], meta: { total: 3 } } };
@@ -164,5 +184,25 @@ for (const operation of ['groups', 'occurrences']) {
     assert.equal(called.searchParams.get('page[offset]'), '25');
     assert.equal(called.searchParams.get('page[limit]'), '25');
     assert.equal(res.body.meta.total, 3);
+  });
+}
+
+test('optional source and action fields reach backend unchanged', async () => {
+  let forwarded;
+  const { handler, res } = setup(async (url, options) => { forwarded = JSON.parse(options.body); return { ok: true, status: 202, json: async () => doc() }; });
+  const body = answer('Reviewed text');
+  Object.assign(body.data.attributes, { source_url: 'https://example.com/source', action_url: 'https://example.com/locator', action_label: 'Find a shop' });
+  await handler(request('resolve', { method: 'POST', query: { sourceId: id }, body }), res);
+  assert.equal(res.code, 202);
+  assert.deepEqual(forwarded, body);
+});
+
+for (const fields of [{ source_url: 'http://example.com' }, { action_url: 'javascript:alert(1)' }, { action_label: 'Find a shop' }]) {
+  test(`invalid optional link fields rejected: ${JSON.stringify(fields)}`, async () => {
+    const { handler, res } = setup(() => assert.fail('unexpected upstream request'));
+    const body = answer('Reviewed text');
+    Object.assign(body.data.attributes, fields);
+    await handler(request('resolve', { method: 'POST', query: { sourceId: id }, body }), res);
+    assertError(res, 422);
   });
 }

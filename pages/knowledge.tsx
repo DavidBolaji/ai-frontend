@@ -382,7 +382,7 @@ export default function Knowledge() {
         </section>
         <section className={styles.detail} aria-label="Record details" aria-busy={detailLoading}>
           {!selected ? <div className={styles.placeholder}><span>◎</span><h2>A closer look</h2><p>Select a record to see the question, the answer<br /> it was given, and why that answer fell short.</p></div>
-            : <><Detail record={selected} feedback={tab !== 'gaps'} pending={detailLoading} failed={Boolean(error)} />{!detailLoading && !error && <KnowledgeResolution key={`${tab}:${selected.id}`} sourceId={selected.id} source={tab === 'gaps' ? 'gap' : tab === 'feedback' ? 'feedback' : 'vote'} onStatusChange={resolution => receiveResolution(selected.id, resolution)} onSubmitted={resolution => submitted(selected.id, resolution)} />}</>}
+            : <><Detail record={selected} feedback={tab !== 'gaps'} pending={detailLoading} failed={Boolean(error)} />{!detailLoading && !error && <KnowledgeResolution key={`${tab}:${selected.id}`} sourceId={selected.id} source={tab === 'gaps' ? 'gap' : tab === 'feedback' ? 'feedback' : 'vote'} onStatusChange={resolution => receiveResolution(selected.id, resolution)} onSubmitted={resolution => submitted(selected.id, resolution)} onNotice={notice => setToast({ id: `${selected.id}:${Date.now()}`, ...notice })} />}</>}
         </section>
       </div>
     </main>

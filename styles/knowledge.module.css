@@ -115,3 +115,138 @@
 @media (prefers-reduced-motion: reduce) { .submit { transition: none; } .submitSpinner { animation-duration: 2.4s; } }
 @media (max-width: 650px) { .submit { width: 100%; } .resolveActions { gap: 10px; } }
 .reviewedAnswer:disabled { background: #eef2f0; color: #77847e; border: 1px solid #dce4df; cursor: not-allowed; }
+
+/* Optional links: a borderless group, so no legend sits on a border line, and
+   each label sits on the same row as its field rather than above it. */
+.links {
+  margin: 18px 0 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.linksLegend {
+  padding: 0;
+  font-size: 13px;
+  font-weight: 650;
+  color: #365447;
+}
+
+.linksHint {
+  margin: 4px 0 14px;
+  color: #77867f;
+  font-size: 12px;
+}
+
+.linkField {
+  display: grid;
+  grid-template-columns: 148px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px 14px;
+  margin-bottom: 10px;
+}
+
+.linkField > label {
+  display: block;
+  grid-column: 1;
+  margin: 0;
+  font-size: 12px;
+  color: #5b6d64;
+}
+
+/* A visually hidden label is position:absolute, so it leaves the grid flow and
+   the field would auto-place into the label column. Pin the field to column 2
+   so every row lines up whether or not its label is shown. */
+.linkField > input,
+.linkField > .sourceUrlRow {
+  grid-column: 2;
+}
+
+.linkField input {
+  width: 100%;
+  min-width: 0;
+  padding: 11px;
+  border: 1px solid #dce4df;
+  border-radius: 7px;
+  background: #fff;
+  color: #293e33;
+  font: inherit;
+}
+
+.linkField input::placeholder {
+  color: #9baba2;
+}
+
+.linkField input[aria-invalid='true'] {
+  border-color: #9c4237;
+}
+
+.sourceUrlRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.linkProblem {
+  grid-column: 2;
+  margin: 0;
+  color: #9c4237;
+  font-size: 12px;
+}
+
+.linkAdd,
+.linkButton {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #17614c;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.linkAdd {
+  margin: 0 0 16px 162px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.linkButton {
+  white-space: nowrap;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.linkAdd:hover,
+.linkButton:hover {
+  color: #124f3e;
+}
+
+.links:disabled .linkAdd,
+.links:disabled .linkButton {
+  color: #8b9690;
+  cursor: default;
+  text-decoration: none;
+}
+
+@media (max-width: 650px) {
+  .linkField {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .linkProblem,
+  .linkAdd {
+    grid-column: 1;
+    margin-left: 0;
+  }
+}
+
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

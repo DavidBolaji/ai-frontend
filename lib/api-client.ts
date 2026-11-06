@@ -284,10 +284,10 @@ class ApiClient {
     return unwrap ? this.unwrapData<T>(payload) : payload as T;
   }
 
-  public async submitKnowledgeAnswer(id: string, answer: string, key: string, source: 'gap' | 'feedback' | 'vote' = 'gap'): Promise<any> {
+  public async submitKnowledgeAnswer(id: string, answer: string, key: string, source: 'gap' | 'feedback' | 'vote' = 'gap', links: { source_url?: string; source_urls?: string[]; action_url?: string; action_label?: string } = {}): Promise<any> {
     const resource = await this.request<any>(`?${new URLSearchParams({ reviewOperation: 'resolve', sourceId: id, sourceKind: source })}`, {
       method: 'POST', headers: { Accept: 'application/vnd.api+json', 'Idempotency-Key': key },
-      body: this.wrapBody('knowledge-resolutions', { answer }),
+      body: this.wrapBody('knowledge-resolutions', { answer, ...links }),
     }, true, '/api/knowledge');
     return { id: resource.id, ...resource.attributes };
   }
