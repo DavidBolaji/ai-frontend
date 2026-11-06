@@ -7,7 +7,7 @@ export default function Home() {
 
   useEffect(() => {
     if (apiClient.isAuthenticated()) {
-      router.replace('/chat');
+      router.replace('/knowledge');
     } else {
       router.replace('/login');
     }
