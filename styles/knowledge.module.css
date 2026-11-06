@@ -250,3 +250,110 @@
   clip: rect(0 0 0 0);
   white-space: nowrap;
 }
+
+.applicability {
+  min-width: 0;
+  padding: 0;
+  margin: 0 0 24px;
+  border: 0;
+}
+.applicability legend {
+  margin-bottom: 12px;
+  font-size: 15px;
+  font-weight: 600;
+  color: #243e34;
+}
+.scopeChoices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.scopeChoice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border: 1px solid #cedbd3;
+  border-radius: 10px;
+  cursor: pointer;
+  background: #fff;
+}
+.scopeChoice input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: #18754e;
+}
+.scopeSelected {
+  border-color: #18754e;
+  background: #edf6f0;
+}
+.municipalityField {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+  max-width: 460px;
+}
+.municipalityField label { font-weight: 600; }
+.municipalityField select {
+  display: block;
+  width: 100%;
+  min-height: 46px;
+  padding: 10px 12px;
+  border: 1px solid #a9bfb2;
+  border-radius: 8px;
+  background: white;
+  color: #183e2d;
+  font: inherit;
+}
+.municipalityField small { color: #54685d; line-height: 1.5; }
+.applicability:disabled .scopeChoice { cursor: default; opacity: .65; }
+@media (max-width: 650px) {
+  .scopeChoices { flex-direction: column; }
+  .scopeChoice { width: 100%; box-sizing: border-box; }
+}
+
+.retryNotice {
+  margin: 12px 0 20px;
+  padding: 16px;
+  border: 1px solid #e8b7b1;
+  border-radius: 10px;
+  background: #fff4f2;
+  color: #8c2118;
+}
+.retryNotice button {
+  padding: 10px 16px;
+  border: 0;
+  border-radius: 8px;
+  background: #18754e;
+  color: white;
+  font: inherit;
+  cursor: pointer;
+}
+.retryNotice button:disabled { opacity: .6; cursor: wait; }
+
+.conflictPanel{display:flex;flex-direction:column;gap:14px;margin:20px 0;padding:20px;border:1px solid #efc4bd;border-radius:12px;background:#fff8f6;color:#34453e;min-width:0}
+.conflictPanel>strong{color:#a52b20;font-size:15px}.conflictPanel>p{margin:0;line-height:1.6}
+.conflictPanel>button{align-self:flex-start;max-width:100%;white-space:normal;text-align:left}
+.conflictClaims{margin:0;padding-left:22px;line-height:1.65;overflow-wrap:anywhere}.conflictClaims li+li{margin-top:8px}
+.conflictPanel>label{font-size:13px;font-weight:600;color:#34453e}
+.conflictPanel textarea{display:block;width:100%;min-width:0;padding:12px 14px;border:1px solid #c9d6ce;border-radius:8px;background:#fff;color:#21312e;font:inherit;line-height:1.6;resize:vertical;box-sizing:border-box}
+.finalAnswerInput{min-height:180px}.replacementReasonInput{min-height:88px}
+.conflictPanel textarea:focus-visible{outline:2px solid #18734f;outline-offset:2px}
+.conflictPanel .overwriteConfirmation{display:flex;align-items:flex-start;gap:10px;line-height:1.6;font-weight:400}
+.conflictPanel .overwriteConfirmation input{flex:0 0 auto;width:18px;height:18px;margin:2px 0 0;padding:0}
+@media(max-width:600px){.conflictPanel{padding:14px}.conflictPanel>button{width:100%}}
+
+.conflictPanel{background:#fff;border-color:#e3d3b5;box-shadow:0 4px 18px #21312e06;gap:12px;padding:24px}
+.conflictHeader{display:grid;gap:10px}.conflictHeader h3{margin:0;font-size:19px;line-height:1.35;color:#243b30}.conflictHeader p{margin:0;line-height:1.65;color:#617168;max-width:65ch}
+.conflictBadge{justify-self:start;border-radius:20px;padding:4px 10px;background:#fff2d9;color:#815718;font-size:11px;font-weight:700;letter-spacing:.3px}
+.conflictSummary{background:#faf8f3;border:1px solid #eee7d9;border-radius:9px;padding:16px;margin:4px 0 8px}.conflictSummary h4{margin:0 0 10px;font-size:13px;color:#6e5429}.conflictSummary li{color:#405047;max-width:70ch}
+.conflictPanel .conflictHint{font-size:12px;line-height:1.6;color:#718078;margin:-5px 0 2px}
+.conflictPanel>label:not(.overwriteConfirmation){margin-top:8px}
+.conflictPanel .conflictPrimaryButton,.conflictPanel .conflictSecondaryButton{font:inherit;font-weight:600;border-radius:8px;padding:11px 16px;line-height:1.4;cursor:pointer;transition:background .15s}
+.conflictPanel .conflictPrimaryButton{background:#176b4c;border:1px solid #176b4c;color:white;margin-top:4px}
+.conflictPanel .conflictPrimaryButton:hover:not(:disabled){background:#115439}
+.conflictPanel .conflictSecondaryButton{background:#fff;border:1px solid #cddbd2;color:#285a43}
+.conflictPanel .conflictSecondaryButton:hover:not(:disabled){background:#f1f6f3}
+.conflictPanel button:disabled{background:#edf1ee;color:#829087;border-color:#dfe6e1;cursor:not-allowed}
+.conflictPanel button:focus-visible{outline:2px solid #18734f;outline-offset:3px}

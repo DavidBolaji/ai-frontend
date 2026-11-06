@@ -287,13 +287,13 @@ export default function Knowledge() {
     const previous = seenStatuses.current[resolution.id];
     seenStatuses.current[resolution.id] = resolution.status;
     if (previous && previous !== resolution.status && ['available', 'failed', 'review_needed'].includes(resolution.status)) {
-      setToast({ id: `${resolution.id}:${resolution.status}`, title: resolution.status === 'available' ? 'Answer available' : 'Answer needs attention',
+      setToast({ id: `${resolution.id}:${resolution.status}`, variant: resolution.status === 'available' ? 'success' : 'error', title: resolution.status === 'available' ? 'Answer available' : 'Answer needs attention',
         body: resolution.status === 'available' ? 'Your reviewed answer is ingested and available in the system.' : resolution.status === 'failed' ? 'Processing could not finish. Your answer is saved; check its status.' : 'Your answer is saved and needs review before publication.' });
     }
   }, []);
   const submitted = useCallback((sourceId: string, resolution: Resolution) => {
     receiveResolution(sourceId, resolution);
-    setToast({ id: `${resolution.id}:submitted`, title: 'Answer submitted', body: 'Your answer is saved. Processing will continue in the background.' });
+    setToast({ id: `${resolution.id}:submitted`, variant: 'success', title: 'Answer submitted', body: 'Your answer is saved. Processing will continue in the background.' });
   }, [receiveResolution]);
 
   const [error, setError] = useState('');
@@ -336,11 +336,12 @@ export default function Knowledge() {
     const version = ++selectionVersion.current;
     setSelected(record); setError(''); setDetailLoading(tab === 'gaps');
     if (tab !== 'gaps') return;
-    try { const detail = await read({ operation: 'gap', id: record.id }); if (version === selectionVersion.current) setSelected({ ...detail, group_id: record.group_id, group_question: record.group_question, occurrence_count: record.occurrence_count }); }
+    try { const detail = await read({ operation: 'gap', id: record.id }); if (version === selectionVersion.current) setSelected({ ...detail, resolution: record.resolution, group_id: record.group_id, group_question: record.group_question, occurrence_count: record.occurrence_count }); }
     catch (err) { if (version === selectionVersion.current) setError((err as Error).message); }
     finally { if (version === selectionVersion.current) setDetailLoading(false); }
   }
-  const filtered = records.filter(record => (tab !== 'gaps' || !rewriteOnly(record))
+  const filtered = records.filter(record => record.resolution?.status !== 'available'
+    && (tab !== 'gaps' || !rewriteOnly(record))
     && JSON.stringify(record).toLowerCase().includes(query.toLowerCase()));
   const statuses = tab === 'messages' ? ['recorded'] : tab === 'gaps' ? ['open', 'researching', 'answered', 'rejected'] : ['quarantined', 'ignored', 'promoted', 'merged', 'closed'];
   const pages = total === null ? null : Math.max(1, Math.ceil(total / 25));
@@ -382,7 +383,7 @@ export default function Knowledge() {
         </section>
         <section className={styles.detail} aria-label="Record details" aria-busy={detailLoading}>
           {!selected ? <div className={styles.placeholder}><span>◎</span><h2>A closer look</h2><p>Select a record to see the question, the answer<br /> it was given, and why that answer fell short.</p></div>
-            : <><Detail record={selected} feedback={tab !== 'gaps'} pending={detailLoading} failed={Boolean(error)} />{!detailLoading && !error && <KnowledgeResolution key={`${tab}:${selected.id}`} sourceId={selected.id} source={tab === 'gaps' ? 'gap' : tab === 'feedback' ? 'feedback' : 'vote'} onStatusChange={resolution => receiveResolution(selected.id, resolution)} onSubmitted={resolution => submitted(selected.id, resolution)} onNotice={notice => setToast({ id: `${selected.id}:${Date.now()}`, ...notice })} />}</>}
+            : <><Detail record={selected} feedback={tab !== 'gaps'} pending={detailLoading} failed={Boolean(error)} />{!detailLoading && !error && <KnowledgeResolution key={`${tab}:${selected.id}`} sourceId={selected.id} initialResolution={selected.resolution} initialApplicability={selected.municipality ? { scope: 'municipality', municipality: selected.municipality } : undefined} source={tab === 'gaps' ? 'gap' : tab === 'feedback' ? 'feedback' : 'vote'} onStatusChange={resolution => receiveResolution(selected.id, resolution)} onSubmitted={resolution => submitted(selected.id, resolution)} onNotice={notice => setToast({ id: `${selected.id}:${Date.now()}`, ...notice })} />}</>}
         </section>
       </div>
     </main>

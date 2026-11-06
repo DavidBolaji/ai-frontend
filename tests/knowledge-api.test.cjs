@@ -206,3 +206,39 @@ for (const fields of [{ source_url: 'http://example.com' }, { action_url: 'javas
     assertError(res, 422);
   });
 }
+
+test('corrections route to existing job and preserve applicability', async () => {
+  let called;
+  const { handler, res } = setup(async (url, options) => { called = { url, options }; return { ok: true, status: 202, json: async () => doc() }; });
+  const body = answer('Corrected');
+  body.data.attributes.applicability = { scope: 'municipality', municipality_code: 'GM0603' };
+  await handler(request('correct', { method: 'POST', query: { sourceId: id }, body }), res);
+  assert.equal(res.code, 202);
+  assert.equal(new URL(called.url).pathname, `/api/v1/admin/kaya/knowledge/resolutions/${id}/correct`);
+  assert.equal(JSON.parse(called.options.body).data.attributes.applicability.municipality_code, 'GM0603');
+});
+
+test('municipality catalog is a read-only proxy route', async () => {
+  let called;
+  const { handler, res } = setup(async url => { called = url; return { ok: true, status: 200, json: async () => ({ jsonapi: { version: '1.1' }, data: [] }) }; });
+  await handler(request('municipalities'), res);
+  assert.equal(res.code, 200);
+  assert.equal(new URL(called).pathname, '/api/v1/admin/kaya/knowledge/municipalities');
+});
+
+test('retry proxy preserves the existing job ID', async () => {
+  let called;
+  const { handler, res } = setup(async (url, options) => { called = { url, options }; return { ok: true, status: 202, json: async () => ({ jsonapi: { version: '1.1' }, data: { type: 'knowledge-resolution-retries', id, attributes: { resolution_id: id, status: 'accepted' } } }) }; });
+  await handler(request('retry', { method: 'POST', query: { sourceId: id }, body: { data: { type: 'knowledge-resolution-retries', attributes: {} } } }), res);
+  assert.equal(res.code, 202);
+  assert.equal(new URL(called.url).pathname, `/api/v1/ops/queues/jobs/${id}/retry`);
+});
+
+test('overwrite forwards version-bound approval without creating a submission', async () => {
+  let called;
+  const { handler, res } = setup(async (url, options) => { called = {url,options}; return {ok:true,status:202,json:async()=>doc()}; });
+  await handler(request('overwrite', {method:'POST', query:{sourceId:id}, body:{data:{type:'knowledge-resolution-approvals',attributes:{record_id:'staff-existing',expected_row_hash:'a'.repeat(64),reason:'Verified correction'}}}}), res);
+  assert.equal(res.code,202);
+  assert.equal(new URL(called.url).pathname, `/api/v1/ops/queues/jobs/${id}/force-approve`);
+  assert.equal(JSON.parse(called.options.body).data.attributes.expected_row_hash,'a'.repeat(64));
+});

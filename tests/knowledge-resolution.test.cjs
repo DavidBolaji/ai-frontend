@@ -41,7 +41,7 @@ function setup(apiClient) {
     setTimeout: fn => { timers.set(++nextTimer, fn); return nextTimer; },
     clearTimeout: id => timers.delete(id),
   });
-  return { Component: exports.default, timers };
+  return { Component: props => React.createElement(exports.default, { initialApplicability: { scope: 'national' }, ...props }), timers };
 }
 const text = root => JSON.stringify(root.toJSON());
 
@@ -128,7 +128,7 @@ for (const source of ['feedback', 'vote']) {
     let root;
     const seen = [];
     await act(async () => { root = renderer.create(React.createElement(Component, { sourceId: 'record', source, onStatusChange: row => row && seen.push(row) })); });
-    assert.equal(calls[0].source, source);
+    assert.equal(calls.find(call => call.operation === 'resolutionLatest').source, source);
     act(() => root.root.findByType('textarea').props.onChange({ target: { value: 'Reviewed answer' } }));
     await act(async () => { await root.root.findByType('form').props.onSubmit({ preventDefault() {} }); });
     assert.equal(seen.at(-1).status, 'available');
@@ -211,7 +211,7 @@ test('5,000 characters and optional destinations are submitted separately', asyn
   assert.equal(root.root.findByProps({ type: 'submit' }).props.disabled, false);
   await act(async () => { await root.root.findByType('form').props.onSubmit({ preventDefault() {} }); });
   assert.equal(args[1].length, 5000);
-  assert.deepEqual(JSON.parse(JSON.stringify(args[4])), { source_urls: ['https://example.com/source'], action_url: 'https://example.com/locator', action_label: 'Find a shop' });
+  assert.deepEqual(JSON.parse(JSON.stringify(args[4])), { applicability: { scope: 'national', municipality_code: null }, source_urls: ['https://example.com/source'], action_url: 'https://example.com/locator', action_label: 'Find a shop' });
   act(() => root.unmount());
 });
 
@@ -236,7 +236,7 @@ test('several source URLs can be added, removed and submitted in order', async (
   act(() => removals[2].props.onClick());
 
   await act(async () => { await root.root.findByType('form').props.onSubmit({ preventDefault() {} }); });
-  assert.deepEqual(JSON.parse(JSON.stringify(args[4])), { source_urls: ['https://example.com/rules', 'https://example.com/fees'] });
+  assert.deepEqual(JSON.parse(JSON.stringify(args[4])), { applicability: { scope: 'national', municipality_code: null }, source_urls: ['https://example.com/rules', 'https://example.com/fees'] });
   act(() => root.unmount());
 });
 
@@ -261,5 +261,119 @@ test('a stored single source_url still fills the first row', async () => {
   let root;
   await act(async () => { root = renderer.create(React.createElement(Component, { sourceId: 'gap' })); });
   assert.equal(root.root.findByProps({ id: 'source-url-gap-0' }).props.value, 'https://example.com/only');
+  act(() => root.unmount());
+});
+
+test('stopped job correction uses its existing ID and never creates a submission', async () => {
+  let corrected;
+  const saved = { id: 'existing-job', status: 'review_needed', attempts: 0, answer: 'Saved answer', can_correct: true,
+    applicability: { scope: 'municipality', municipality_code: 'GM0603' },
+    failure: { owner: 'submitter', message: 'Select Rijswijk', stage: 'prepare' } };
+  const { Component } = setup({
+    readKnowledge: async p => p.operation === 'municipalities' ? { municipalities: [{ name: 'Rijswijk', code: 'GM0603' }] } : p.operation === 'resolutionLatest' ? { resolution: saved } : { ...saved, status: 'accepted' },
+    submitKnowledgeAnswer: async () => assert.fail('must not create another job'),
+    correctKnowledgeAnswer: async (id, values, key) => { corrected = { id, values, key }; return { ...saved, status: 'accepted' }; },
+  });
+  let root;
+  await act(async () => { root = renderer.create(React.createElement(Component, { sourceId: 'gap' })); });
+  assert.match(text(root), /Select Rijswijk/);
+  assert.match(text(root), /Save corrections and retry/);
+  await act(async () => { await root.root.findByType('form').props.onSubmit({ preventDefault() {} }); });
+  assert.equal(corrected.id, 'existing-job');
+  assert.equal(corrected.values.answer, 'Saved answer');
+  assert.equal(corrected.values.applicability.municipality_code, 'GM0603');
+  assert.ok(corrected.key);
+  act(() => root.unmount());
+});
+
+test('missing location selection retains draft and does not queue', async () => {
+  let called = false;
+  const { Component } = setup({
+    readKnowledge: async () => ({ resolution: null }),
+    submitKnowledgeAnswer: async () => { called = true; },
+  });
+  let root;
+  await act(async () => { root = renderer.create(React.createElement(Component, { sourceId: 'gap', initialApplicability: { scope: 'municipality' } })); });
+  act(() => root.root.findByType('textarea').props.onChange({ target: { value: 'Saved draft' } }));
+  await act(async () => { await root.root.findByType('form').props.onSubmit({ preventDefault() {} }); });
+  assert.equal(called, false);
+  assert.equal(root.root.findByType('textarea').props.value, 'Saved draft');
+  assert.match(text(root), /Choose applicability/);
+  act(() => root.unmount());
+});
+
+test('municipality picker works without a catalog API and includes all 342 locations', async () => {
+  const calls = [];
+  const { Component } = setup({ readKnowledge: async p => { calls.push(p.operation); return { resolution: null }; } });
+  let root;
+  await act(async () => { root = renderer.create(React.createElement(Component, { sourceId: 'gap', initialApplicability: { scope: 'municipality' } })); });
+  const dropdown = root.root.findByType('select');
+  assert.equal(dropdown.findAllByType('option').length, 343);
+  assert.ok(dropdown.findAllByType('option').some(o => o.props.value === 'GM0603' && o.children[0] === 'Rijswijk'));
+  assert.ok(dropdown.findAllByType('option').some(o => o.props.value === 'GM1959' && o.children[0] === 'Altena'));
+  assert.ok(!calls.includes('municipalities'));
+  assert.ok(!text(root).includes('Unable to load municipalities'));
+  assert.match(text(root), /Across the Netherlands/);
+  act(() => root.unmount());
+});
+
+test('temporary failure offers a retry of the saved job without resubmitting the question', async () => {
+  let retried;
+  const saved = { id: 'saved-job', status: 'failed', attempts: 5, answer: 'Saved answer', can_retry: true,
+    failure: { message: 'Temporary timeout', owner: 'system', retryable: true } };
+  const { Component } = setup({
+    readKnowledge: async p => p.operation === 'resolutionLatest' ? { resolution: saved } : { ...saved, status: 'accepted', attempts: 0 },
+    retryKnowledgeSubmission: async id => { retried = id; return { ...saved, status: 'accepted', attempts: 0 }; },
+    submitKnowledgeAnswer: async () => assert.fail('must not create a new job'),
+  });
+  let root;
+  await act(async () => { root = renderer.create(React.createElement(Component, { sourceId: 'gap' })); });
+  assert.match(text(root), /do not need to ask the question again/);
+  const button = root.root.findAllByType('button').find(b => b.children.includes('Retry saved submission'));
+  assert.ok(button);
+  await act(async () => { await button.props.onClick(); });
+  assert.equal(retried, 'saved-job');
+  act(() => root.unmount());
+});
+
+test('conflict compares answers and explicitly overwrites the existing record', async () => {
+  let overwritten;
+  const saved = { id: 'conflict-job', status: 'review_needed', attempts: 0, answer: 'New answer',
+    failure: { action: 'review_conflict', owner: 'submitter', message: 'Answer conflict' } };
+  const existing = { record_id: 'staff-existing', row_hash: 'a'.repeat(64), question: 'Question?', answer: 'Old answer' };
+  const { Component } = setup({
+    readKnowledge: async p => p.operation === 'conflictReview' ? { existing_record: existing, submitted_answer: 'New answer', conflicts: ['Incompatible location claims'] } : p.operation === 'resolutionLatest' ? { resolution: saved } : { ...saved, status: 'accepted' },
+    overwriteKnowledgeAnswer: async (...args) => { overwritten = args; return { ...saved, status: 'accepted' }; },
+  });
+  let root;
+  await act(async () => { root = renderer.create(React.createElement(Component, { sourceId: 'gap' })); });
+  await act(async () => { await root.root.findAllByType('button').find(b => b.children.includes('Resolve conflicting claims')).props.onClick(); });
+  assert.match(text(root), /Incompatible location claims/);
+  assert.doesNotMatch(text(root), /Old answer/);
+  act(() => root.root.findByProps({id: 'final-answer-gap'}).props.onChange({target:{value:'Final edited answer'}}));
+  const overwrite = () => root.root.findAllByType('button').find(b => b.children.includes('Save final answer'));
+  assert.equal(overwrite().props.disabled, true);
+  act(() => root.root.findByProps({id:'overwrite-reason-gap'}).props.onChange({target:{value:'Staff correction'}}));
+  act(() => root.root.findByProps({type:'checkbox'}).props.onChange({target:{checked:true}}));
+  await act(async () => { await overwrite().props.onClick(); });
+  assert.equal(overwritten[0], 'conflict-job');
+  assert.equal(overwritten[1].record_id, 'staff-existing');
+  assert.equal(overwritten[1].row_hash, 'a'.repeat(64));
+  assert.equal(overwritten[2], 'Staff correction');
+  assert.equal(overwritten[3], 'Final edited answer');
+  act(() => root.unmount());
+});
+
+test('restores the saved grouped job instead of looking up another occurrence', async () => {
+  const calls = [];
+  const saved = { id: 'persisted-review-job', status: 'review_needed', answer: 'Saved answer', attempts: 0,
+    failure: { owner: 'submitter', action: 'review_conflict', message: 'Saved conflict' } };
+  const { Component } = setup({ readKnowledge: async p => { calls.push(p); return saved; } });
+  let root;
+  await act(async () => { root = renderer.create(React.createElement(Component, { sourceId: 'different-occurrence', initialResolution: saved })); });
+  assert.equal(calls[0].operation, 'resolution');
+  assert.equal(calls[0].id, 'persisted-review-job');
+  assert.match(text(root), /Saved conflict/);
+  assert.match(text(root), /Resolve conflicting claims/);
   act(() => root.unmount());
 });

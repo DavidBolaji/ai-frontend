@@ -6,6 +6,7 @@ export interface ToastNotification {
   body: string;
   action_url?: string;
   category?: string;
+  variant?: 'error' | 'success' | 'info';
 }
 
 interface NotificationToastProps {
@@ -45,7 +46,7 @@ export function NotificationToast({
         right: '1.25rem',
         zIndex: 9999,
         maxWidth: '22rem',
-        background: '#1e293b',
+        background: notification.variant === 'error' ? '#b42318' : notification.variant === 'success' ? '#18754e' : '#1e293b',
         color: '#f8fafc',
         borderRadius: '0.75rem',
         boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
@@ -74,7 +75,7 @@ export function NotificationToast({
           style={{
             background: 'none',
             border: 'none',
-            color: '#94a3b8',
+            color: notification.variant === 'error' || notification.variant === 'success' ? '#fff' : '#94a3b8',
             cursor: 'pointer',
             fontSize: '1rem',
             lineHeight: 1,
@@ -86,7 +87,7 @@ export function NotificationToast({
         </button>
       </div>
       {notification.body && (
-        <p style={{ fontSize: '0.85rem', color: '#cbd5e1', margin: 0, lineHeight: 1.4 }}>
+        <p style={{ fontSize: '0.85rem', color: notification.variant === 'error' || notification.variant === 'success' ? '#fff' : '#cbd5e1', margin: 0, lineHeight: 1.4 }}>
           {notification.body}
         </p>
       )}

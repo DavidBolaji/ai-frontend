@@ -55,7 +55,11 @@ test(`knowledge page distinguishes ${grouping_status} grouping and tracks ingest
   assert.match(JSON.stringify(root.toJSON()), /Answer submitted/);
   assert.ok(root.root.findByProps({ 'aria-label': 'Dismiss notification' }));
   act(() => formProps.onStatusChange({ ...resolution, status: 'available' }));
-  assert.match(root.root.findByProps({ role: 'img' }).props['aria-label'], /ingested and available/);
+  assert.equal(root.root.findAllByProps({ role: 'img' }).length, 0);
+  assert.equal(root.root.findAllByType('h2').some(node => node.children.includes('A question')), false);
+  act(() => formProps.onStatusChange({ ...resolution, status: 'review_needed' }));
+  assert.equal(root.root.findAllByType('h2').some(node => node.children.includes('A question')), true);
+  act(() => formProps.onStatusChange({ ...resolution, status: 'available' }));
   assert.match(JSON.stringify(root.toJSON()), /Answer available/);
   act(() => root.unmount());
 });

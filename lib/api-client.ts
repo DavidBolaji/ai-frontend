@@ -284,10 +284,34 @@ class ApiClient {
     return unwrap ? this.unwrapData<T>(payload) : payload as T;
   }
 
-  public async submitKnowledgeAnswer(id: string, answer: string, key: string, source: 'gap' | 'feedback' | 'vote' = 'gap', links: { source_url?: string; source_urls?: string[]; action_url?: string; action_label?: string } = {}): Promise<any> {
+  public async submitKnowledgeAnswer(id: string, answer: string, key: string, source: 'gap' | 'feedback' | 'vote' = 'gap', links: { source_url?: string; source_urls?: string[]; action_url?: string; action_label?: string; applicability?: { scope: string; municipality_code?: string | null } } = {}): Promise<any> {
     const resource = await this.request<any>(`?${new URLSearchParams({ reviewOperation: 'resolve', sourceId: id, sourceKind: source })}`, {
       method: 'POST', headers: { Accept: 'application/vnd.api+json', 'Idempotency-Key': key },
       body: this.wrapBody('knowledge-resolutions', { answer, ...links }),
+    }, true, '/api/knowledge');
+    return { id: resource.id, ...resource.attributes };
+  }
+
+  public async overwriteKnowledgeAnswer(id: string, record: {record_id: string; row_hash: string}, reason: string, finalAnswer?: string): Promise<any> {
+    await this.request<any>(`?${new URLSearchParams({ reviewOperation: 'overwrite', sourceId: id })}`, {
+      method: 'POST', headers: { Accept: 'application/vnd.api+json' },
+      body: this.wrapBody('knowledge-resolution-approvals', { record_id: record.record_id, expected_row_hash: record.row_hash, reason, ...(finalAnswer !== undefined ? { final_answer: finalAnswer } : {}) }),
+    }, true, '/api/knowledge');
+    return this.readKnowledge({ operation: 'resolution', id });
+  }
+
+  public async retryKnowledgeSubmission(id: string): Promise<any> {
+    await this.request<any>(`?${new URLSearchParams({ reviewOperation: 'retry', sourceId: id })}`, {
+      method: 'POST', headers: { Accept: 'application/vnd.api+json' },
+      body: this.wrapBody('knowledge-resolution-retries', {}),
+    }, true, '/api/knowledge');
+    return this.readKnowledge({ operation: 'resolution', id });
+  }
+
+  public async correctKnowledgeAnswer(id: string, values: Record<string, unknown>, key: string): Promise<any> {
+    const resource = await this.request<any>(`?${new URLSearchParams({ reviewOperation: 'correct', sourceId: id })}`, {
+      method: 'POST', headers: { Accept: 'application/vnd.api+json', 'Idempotency-Key': key },
+      body: this.wrapBody('knowledge-resolutions', values),
     }, true, '/api/knowledge');
     return { id: resource.id, ...resource.attributes };
   }
@@ -301,6 +325,7 @@ class ApiClient {
     const doc = await this.request<any>(`?${query}`, { headers: { Accept: 'application/vnd.api+json' } }, true, '/api/knowledge', false);
     const record = (data: any) => data ? { id: data.id, ...data.attributes } : null;
     if (params.operation === 'resolutionLatest') return { resolution: record(doc.data) };
+    if (params.operation === 'municipalities') return { municipalities: (doc.data || []).map(record) };
     if (Array.isArray(doc.data)) return { [['gaps', 'groups', 'occurrences'].includes(params.operation) ? 'gaps' : 'reports']: doc.data.map(record), meta: doc.meta || {} };
     return record(doc.data);
   }

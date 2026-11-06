@@ -83,7 +83,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (source !== undefined && !['gap', 'feedback', 'vote'].includes(source as string)) return failure(res, 400, 'Unsupported resolution source.');
   const path = source === 'feedback' || source === 'vote' ? `/admin/kaya/knowledge/sources/${source}` : '/admin/kaya/knowledge/gaps';
   let endpoint: string;
-  if (operation === 'resolve' && uuid.test(id)) endpoint = `${path}/${id}/resolutions`;
+  if (operation === 'conflictReview' && uuid.test(id)) endpoint = `/ops/queues/jobs/${id}/review`;
+  else if (operation === 'overwrite' && uuid.test(id)) endpoint = `/ops/queues/jobs/${id}/force-approve`;
+  else if (operation === 'retry' && uuid.test(id)) endpoint = `/ops/queues/jobs/${id}/retry`;
+  else if (operation === 'correct' && uuid.test(id)) endpoint = `/admin/kaya/knowledge/resolutions/${id}/correct`;
+  else if (operation === 'municipalities') endpoint = '/admin/kaya/knowledge/municipalities';
+  else if (operation === 'resolve' && uuid.test(id)) endpoint = `${path}/${id}/resolutions`;
   else if (operation === 'resolutionLatest' && uuid.test(id)) endpoint = `${path}/${id}/resolutions/latest`;
   else if (operation === 'resolution' && uuid.test(id)) endpoint = `/admin/kaya/knowledge/resolutions/${id}`;
   else if (operation === 'groups') endpoint = '/admin/kaya/knowledge/gap-groups';
@@ -93,13 +98,26 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   else if (operation === 'messages') endpoint = '/admin/kaya/feedback/messages';
   else if (operation === 'feedback') endpoint = '/admin/kaya/feedback/reports';
   else return failure(res, 400, 'Unsupported review operation.');
-  if ((operation === 'resolve') !== (req.method === 'POST')) {
+  if ((['resolve', 'correct', 'retry', 'overwrite'].includes(operation as string)) !== (req.method === 'POST')) {
     res.setHeader('Allow', operation === 'resolve' ? 'POST' : 'GET');
     return failure(res, 405, 'This method is not supported for this resource.');
   }
   const key = req.headers['idempotency-key'];
   let body: any;
-  if (operation === 'resolve') {
+  if (operation === 'overwrite') {
+    try { body = await readDocument(req); }
+    catch { return failure(res, 400, 'Provide a valid overwrite request.'); }
+    const a = body?.data?.attributes;
+    if (body?.data?.type !== 'knowledge-resolution-approvals' || 'id' in body.data || 'lid' in body.data || !a || Object.keys(a).some(k => !['record_id', 'expected_row_hash', 'reason', 'final_answer'].includes(k)) || typeof a.record_id !== 'string' || !a.record_id || a.record_id.length > 100 || !/^[a-f0-9]{64}$/.test(a.expected_row_hash || '') || typeof a.reason !== 'string' || !a.reason.trim() || a.reason.length > 2000 || (a.final_answer !== undefined && (typeof a.final_answer !== 'string' || !a.final_answer.trim() || a.final_answer.length > 5000)))
+      return failure(res, 422, 'Compare the current record and provide an overwrite reason.');
+  }
+  if (operation === 'retry') {
+    try { body = await readDocument(req); }
+    catch { return failure(res, 400, 'Provide a retry request.'); }
+    if (body?.data?.type !== 'knowledge-resolution-retries' || !body.data.attributes || Object.keys(body.data.attributes).length || 'id' in body.data || 'lid' in body.data)
+      return failure(res, 422, 'Retry the saved submission without changing its contents.');
+  }
+  if (['resolve', 'correct'].includes(operation as string)) {
     if (typeof key !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(key)) return failure(res, 400, 'Provide an Idempotency-Key header.');
     try { body = await readDocument(req); }
     catch (error) { return failure(res, error instanceof RangeError ? 413 : 400, 'The request must contain a valid JSON:API document of at most 64 KiB.'); }
@@ -107,8 +125,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (body.data.type !== 'knowledge-resolutions') return failure(res, 409, 'Expected resource type knowledge-resolutions.', '/data/type');
     if ('id' in body.data || 'lid' in body.data) return failure(res, 403, 'Resolution IDs are assigned by the server.', '/data/id');
     const attrs = body.data.attributes;
-    if (!attrs || typeof attrs !== 'object' || Array.isArray(attrs) || typeof attrs.answer !== 'string' || !attrs.answer.trim() || Array.from(attrs.answer).length > 5000 || Object.keys(attrs).some(k => !['answer', 'source_url', 'source_urls', 'action_url', 'action_label'].includes(k)))
+    if (!attrs || typeof attrs !== 'object' || Array.isArray(attrs) || typeof attrs.answer !== 'string' || !attrs.answer.trim() || Array.from(attrs.answer).length > 5000 || Object.keys(attrs).some(k => !['answer', 'source_url', 'source_urls', 'action_url', 'action_label', 'applicability', ...(operation === 'correct' ? ['question'] : [])].includes(k)))
       return failure(res, 422, 'Enter an answer of at most 5,000 characters. Use the optional source and action fields for links.', '/data/attributes/answer');
+    if (attrs.question !== undefined && (typeof attrs.question !== 'string' || !attrs.question.trim() || Array.from(attrs.question).length > 2000)) return failure(res, 422, 'Enter a question of at most 2,000 characters.', '/data/attributes/question');
+    if (attrs.applicability !== undefined) {
+      const a = attrs.applicability;
+      if (!a || typeof a !== 'object' || Array.isArray(a) || Object.keys(a).some(k => !['scope', 'municipality_code'].includes(k)) || !['national', 'municipality'].includes(a.scope) || (a.scope === 'municipality' ? !/^GM[0-9]{4}$/.test(a.municipality_code || '') : Boolean(a.municipality_code)))
+        return failure(res, 422, 'Select a valid scope and municipality.', '/data/attributes/applicability');
+    }
     for (const field of ['source_url', 'action_url']) {
       if (attrs[field] === undefined || attrs[field] === null || attrs[field] === '') continue;
       if (typeof attrs[field] !== 'string' || attrs[field].length > MAX_URL_LENGTH) return failure(res, 422, 'URLs must contain at most 2,000 characters.', `/data/attributes/${field}`);
