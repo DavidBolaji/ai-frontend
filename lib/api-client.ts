@@ -117,6 +117,9 @@ class ApiClient {
 
   private normalizeError(payload: unknown, status: number, statusText: string): ApiError {
     if (payload && typeof payload === 'object') {
+      if ('error' in payload && typeof payload.error === 'string') {
+        return { errors: [{ status: String(status), code: 'request_failed', title: 'Request failed', detail: payload.error }] };
+      }
       const jsonApiError = payload as JsonApiErrorDocument;
       if (Array.isArray(jsonApiError.errors) && jsonApiError.errors.length > 0) {
         return { errors: jsonApiError.errors };

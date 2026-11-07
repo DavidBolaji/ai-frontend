@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev -p 3004",
+    "dev": "next dev -p 3000",
+    "chat": "npm run dev -- --hostname 127.0.0.1 --port 3003",
     "build": "next build",
     "start": "next start -p 3000",
     "lint": "tsc --noEmit",
@@ -12,8 +13,8 @@
   "dependencies": {
     "@mapbox/polyline": "^1.2.1",
     "@types/mapbox__polyline": "^1.0.5",
-    "maplibre-gl": "^5.24.0",
-    "next": "14.2.5",
+    "maplibre-gl": "^6.16.0",
+    "next": "16.4.3",
     "react": "18.2.0",
     "react-dom": "18.2.0",
     "react-markdown": "^10.1.0",
@@ -23,7 +24,10 @@
     "@types/node": "20.14.10",
     "@types/react": "18.2.79",
     "@types/react-dom": "18.2.25",
-    "react-test-renderer": "18.2.0",
-    "typescript": "5.5.4"
+    "typescript": "5.5.4",
+    "react-test-renderer": "18.2.0"
+  },
+  "engines": {
+    "node": "24.x"
   }
 }
