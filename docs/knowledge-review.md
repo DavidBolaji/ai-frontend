@@ -10,7 +10,7 @@ On the backend, add each authorized staff user's ID to the existing `ADMIN_USER_
 
 Sign in at `/login?next=/knowledge`. All successful logins return to the workspace. The home page opens knowledge review; former chat and roadmap URLs redirect there. Existing session refresh is reused. Anonymous visitors see a sign-in message and receive no review records.
 
-For local development, set `API_BASE_URL=http://127.0.0.1:8081/api/v1` in `.env.local`, run the backend, then:
+For local development, set `API_BASE_URL=http://127.0.0.1:8010/api/v1` in `.env.local`, run the backend, then:
 
 ```bash
 npm run dev -- --hostname 127.0.0.1 --port 3015
@@ -98,3 +98,8 @@ The System Detected Gap list hides records whose only active signal is
 missing knowledge, remain visible. This is a frontend display filter; stored
 reports and backend pagination totals are unchanged, so pages can contain fewer
 than 25 visible cards. User feedback and Voting feedback are not filtered.
+
+
+For current submission, extension, conflict replacement, and same-job correction
+acceptance checks in both this UI and the backend API, see
+[local knowledge submission checks](../../ai-platform/docs/knowledge-submission-local-checks.md).

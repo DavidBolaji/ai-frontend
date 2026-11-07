@@ -226,6 +226,7 @@ export default function KnowledgeResolution({ sourceId, source = 'gap', onStatus
       </>}
       <details className={styles.blockedDetails}><summary>Submission details</summary>
         <p>Submission: {resolution.id}{resolution.failure.stage ? ` · Step: ${resolution.failure.stage}` : ''}</p>
+        {resolution.failure.owner && <p>Next action owner: {resolution.failure.owner === 'submitter' ? 'Staff reviewer' : resolution.failure.owner === 'system' ? 'Automatic processing' : 'Operator'}.</p>}
       </details>
       {resolution.failure.owner === 'operator' && !resolution.failure.retryable && <p>No answer edit is known to resolve this issue. Share this submission ID with an operator.</p>}
     </div>}
@@ -243,7 +244,7 @@ export default function KnowledgeResolution({ sourceId, source = 'gap', onStatus
       {formError && <p role="alert">{formError}</p>}
       {conflict && <>
         <div className={styles.conflictSummary}><h4>What needs your attention</h4><ul className={styles.conflictClaims}>{(conflict.conflicts || []).map((claim, index) => <li key={index}>{claim}</li>)}</ul></div>
-        <label htmlFor={`final-answer-${sourceId}`}>Final answer</label><p className={styles.conflictHint}>Enter the complete answer that should replace the existing document.</p>
+        <label htmlFor={`final-answer-${sourceId}`}>Enter final answer</label><p className={styles.conflictHint}>Enter the complete answer that should replace the existing document.</p>
         <textarea className={styles.finalAnswerInput} rows={6} id={`final-answer-${sourceId}`} value={finalAnswer} maxLength={5000} disabled={submitting} onChange={e => setFinalAnswer(e.target.value)} />
         <label htmlFor={`overwrite-reason-${sourceId}`}>Reason for this update</label>
         <textarea className={styles.replacementReasonInput} rows={3} id={`overwrite-reason-${sourceId}`} value={overwriteReason} maxLength={2000} disabled={submitting} onChange={e => setOverwriteReason(e.target.value)} />
