@@ -48,6 +48,8 @@ export default function KnowledgeResolution({ sourceId, source = 'gap', onStatus
   const [matchReview, setMatchReview] = useState<{ candidates: {record_id: string; row_hash: string; question: string; answer: string}[]; model_explanation?: string } | null>(null);
   const [matchChoice, setMatchChoice] = useState('');
   const [matchDocument, setMatchDocument] = useState('');
+  const [revalidationRequested, setRevalidationRequested] = useState(false);
+  const [savingClarification, setSavingClarification] = useState(false);
   const [overwriteReason, setOverwriteReason] = useState('');
   const [finalAnswer, setFinalAnswer] = useState('');
   const [overwriteConfirmed, setOverwriteConfirmed] = useState(false);
@@ -204,9 +206,16 @@ export default function KnowledgeResolution({ sourceId, source = 'gap', onStatus
   }
 
   async function clarifyMatch() {
-    if (!resolution || !matchReview || !matchChoice || locked.current || !scope || (scope === 'municipality' && !municipality)) return;
+    if (!resolution || !matchReview || !matchChoice || locked.current) return;
+    if (!scope || (scope === 'municipality' && !municipality)) {
+      setFormError('Choose where this answer applies before revalidating.');
+      setLocationError('Choose applicability and select a municipality for a local answer.');
+      return;
+    }
     const selected = matchChoice === 'existing' ? matchReview.candidates.find(item => item.record_id === matchDocument) : undefined;
-    if (matchChoice === 'existing' && !selected) return;
+    if (matchChoice === 'existing' && !selected) { setFormError('Select the existing document before revalidating.'); return; }
+    setRevalidationRequested(true);
+    setSavingClarification(true);
     locked.current = true; setSubmitting(true); setFormError('');
     const relationship_review = { kind: selected ? 'existing' : 'new', ...(selected ? { record_id: selected.record_id, expected_row_hash: selected.row_hash } : {}) };
     const values = { answer: answer.trim(), ...(question.trim() ? {question: question.trim()} : {}), applicability: { scope, municipality_code: scope === 'municipality' ? municipality : null }, relationship_review,
@@ -223,8 +232,8 @@ export default function KnowledgeResolution({ sourceId, source = 'gap', onStatus
         setPollVersion(v => v + 1);
       }
     } catch (error) {
-      if (mounted.current) { setMatchReview(null); setMatchChoice(''); setFormError((error as ApiError)?.errors?.[0]?.detail || 'Unable to save the clarification. Your answer is kept.'); }
-    } finally { locked.current = false; if (mounted.current) setSubmitting(false); }
+      if (mounted.current) { setRevalidationRequested(false); setMatchReview(null); setMatchChoice(''); setFormError((error as ApiError)?.errors?.[0]?.detail || 'Unable to save the clarification. Your answer is kept.'); }
+    } finally { locked.current = false; if (mounted.current) { setSavingClarification(false); setSubmitting(false); } }
   }
 
   async function overwriteAnswer() {
@@ -245,6 +254,11 @@ export default function KnowledgeResolution({ sourceId, source = 'gap', onStatus
 
   const active = Boolean(resolution && !terminal.has(resolution.status));
   const available = resolution?.status === 'available';
+  const progressMessage = savingClarification ? 'Saving clarification…'
+    : active ? ({accepted: revalidationRequested ? 'Clarification saved. Waiting for validation…' : 'Your answer is saved. Waiting for validation…', processing: 'Checking your answer…', publishing: 'Publishing your answer…', ingesting: 'Adding your answer to search…', verifying: 'Verifying your answer is available…'}[resolution!.status] || 'Processing your answer…')
+    : revalidationRequested && available ? 'Your answer is ingested and available.'
+    : revalidationRequested && resolution?.status === 'review_needed' ? 'Validation finished. Review the issue below.'
+    : revalidationRequested && resolution?.status === 'failed' ? 'Validation stopped. See the reason below.' : '';
   const correctionBlocked = Boolean(resolution && ['failed', 'review_needed'].includes(resolution.status) && resolution.can_correct === false);
   const fieldsDisabled = loading || submitting || active || available || correctionBlocked;
   const locationHold = Boolean(resolution && ['failed', 'review_needed'].includes(resolution.status) && (
@@ -262,6 +276,7 @@ export default function KnowledgeResolution({ sourceId, source = 'gap', onStatus
     : written >= 4000 ? `${5000 - written} characters left` : '';
   return <section aria-label="Resolve knowledge record">
     <h3>Provide the correct answer</h3>
+    {progressMessage && <p className={styles.validationProgress} role="status" aria-live="polite">{progressMessage}</p>}
     {resolution && !resolution.failure && resolution.error && <p role="alert">{resolution.issue || 'Processing stopped. Your answer is saved. The cause needs investigation.'} Submission: {resolution.id}</p>}
     {resolution?.failure && <div role="alert" className={styles.ingestionBlocked} aria-labelledby={`blocked-title-${sourceId}`}>
       <span className={styles.blockedBadge}>Publication blocked</span>
@@ -296,7 +311,7 @@ export default function KnowledgeResolution({ sourceId, source = 'gap', onStatus
             {matchReview.candidates.find(item => item.record_id === matchDocument) && <p>{matchReview.candidates.find(item => item.record_id === matchDocument)!.answer}</p>}
             {!matchReview.candidates.length && <p>No current document is available. Refresh the review or edit the submission.</p>}
           </div>}
-          <button className={styles.revalidateButton} type="button" disabled={submitting || !matchChoice || (matchChoice === 'existing' && !matchDocument)} onClick={() => void clarifyMatch()}>Save clarification and revalidate</button>
+          <button className={styles.revalidateButton} type="button" disabled={submitting || !matchChoice || (matchChoice === 'existing' && !matchDocument)} onClick={() => void clarifyMatch()}>{submitting ? 'Saving clarification…' : 'Save clarification and revalidate'}</button>
         </>}
       </div>}
       {resolution.failure.owner === 'operator' && !resolution.failure.retryable && <p>No answer edit is known to resolve this issue. Contact an operator for help.</p>}
@@ -308,7 +323,7 @@ export default function KnowledgeResolution({ sourceId, source = 'gap', onStatus
         {submitting ? 'Restarting…' : 'Retry saved submission'}
       </button>
     </div>}
-    {resolution && active && resolution.attempts > 0 && <p role="status">Processing is retrying automatically after a temporary service error. Your answer is saved; no resubmission is needed.</p>}
+
     {resolution?.status === 'review_needed' && resolution.failure?.action === 'review_conflict' && <section aria-label="Conflicting answer" className={styles.conflictPanel}>
       <div className={styles.conflictHeader}><span className={styles.conflictBadge}>Review needed</span><h3>Review the document update</h3><p>Your answer is saved. Review the points below, then enter the final version to publish.</p></div>
       <button className={styles.conflictSecondaryButton} type="button" disabled={submitting} onClick={() => void reviewConflict()}>{submitting ? 'Loading claims…' : 'Resolve conflicting claims'}</button>

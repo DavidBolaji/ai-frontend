@@ -394,3 +394,5 @@
 .ingestionBlocked .feedbackComparisons p{margin:6px 0 0}
 .feedbackAction{margin-top:14px;padding-top:12px;border-top:1px solid #e0e6e2;color:#34453e;font-weight:500}
 .ingestionBlocked .feedbackAction p{margin:0}
+
+.validationProgress{margin:12px 0;padding:12px 14px;border:1px solid #cddfd5;border-radius:8px;background:#f1f7f3;color:#285a43;font-size:14px;line-height:1.5}

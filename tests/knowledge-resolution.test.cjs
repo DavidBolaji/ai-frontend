@@ -421,7 +421,7 @@ test('ambiguous document matches show model feedback and revalidate the same sub
       return new Promise(resolve => { finish = () => {current = {...current, status: 'accepted', failure: null}; resolve(current);}; });
     },
   };
-  const {Component} = setup(api);
+  const {Component, timers} = setup(api);
   let root;
   await act(async () => {root = renderer.create(React.createElement(Component, {sourceId: 'gap'}));});
   assert.match(text(root), /The names may describe different desks/);
@@ -432,11 +432,16 @@ test('ambiguous document matches show model feedback and revalidate the same sub
   assert.doesNotMatch(text(root), /Submission details|Explain the subject|Clarify which document/);
   act(() => root.root.findAllByType('input').find(node => node.props.name === 'match-gap' && node.props.value === 'new').props.onChange());
   let pending;
-  act(() => {pending = button('Save clarification and revalidate').props.onClick(); button('Save clarification and revalidate').props.onClick();});
+  act(() => {const save = button('Save clarification and revalidate'); pending = save.props.onClick(); save.props.onClick();});
   assert.equal(calls, 1);
+  assert.match(text(root), /Saving clarification…/);
   await act(async () => {finish(); await pending;});
   assert.equal(calls, 1);
   assert.doesNotMatch(text(root), /Clarify which document/);
+  assert.match(text(root), /Clarification saved. Waiting for validation/);
+  current = {...current, status: 'available'};
+  await act(async () => {const [id, poll] = timers.entries().next().value; timers.delete(id); await poll();});
+  assert.match(text(root), /Your answer is ingested and available/);
   act(() => root.unmount());
 });
 
@@ -481,3 +486,25 @@ test('document feedback renders as separate paragraphs with a numbered title lis
   assert.match(text(root), /Silver Kite Test Desk/);
   act(() => root.unmount());
 });
+
+for (const missingScope of [true, false]) {
+  test(missingScope ? 'revalidation reports missing applicability instead of silently returning' : 'revalidation shows a failed save inline without requiring a toast callback', async () => {
+    const current = {id: 'held-feedback', status: 'review_needed', attempts: 0, answer: 'Saved answer', question: 'Where is the desk?', applicability: {scope: missingScope ? '' : 'national'}, failure: {action: 'review_relationship', message: 'Clarify the document match.'}};
+    let calls = 0;
+    const api = {
+      readKnowledge: async params => params.operation === 'conflictReview' ? {review_kind: 'relationship', candidates: []} : {resolution: current},
+      correctKnowledgeAnswer: async () => {calls++; throw {errors: [{detail: 'Validation is temporarily unavailable.'}]};},
+    };
+    const {Component} = setup(api);
+    let root;
+    await act(async () => {root = renderer.create(React.createElement(Component, {sourceId: 'gap'}));});
+    const button = label => root.root.findAllByType('button').find(node => node.children.join('') === label);
+    await act(async () => {await button('Review documents').props.onClick();});
+    act(() => root.root.findAllByType('input').find(node => node.props.name === 'match-gap' && node.props.value === 'new').props.onChange());
+    await act(async () => {await button('Save clarification and revalidate').props.onClick();});
+    assert.match(text(root), missingScope ? /Choose where this answer applies before revalidating/ : /Validation is temporarily unavailable/);
+    assert.equal(calls, missingScope ? 0 : 1);
+    assert.doesNotMatch(text(root), /Saving clarification…/);
+    act(() => root.unmount());
+  });
+}
