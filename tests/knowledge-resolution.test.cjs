@@ -377,3 +377,30 @@ test('restores the saved grouped job instead of looking up another occurrence', 
   assert.match(text(root), /Resolve conflicting claims/);
   act(() => root.unmount());
 });
+
+
+test('location hold explains blocked ingestion and saves national applicability on the same submission', async () => {
+  const saved = { id: 'location-job', status: 'review_needed', attempts: 0,
+    answer: 'Nationwide insurance comparison', can_correct: true,
+    applicability: { scope: 'municipality', municipality_code: 'GM0753' },
+    failure: { message: 'The answer location does not match the saved location.',
+      owner: 'submitter', action: 'correct_metadata', fields: ['applicability'] } };
+  let corrected;
+  const { Component } = setup({
+    readKnowledge: async params => params.operation === 'resolutionLatest' ? { resolution: saved } : { id: 'location-job', status: 'accepted', attempts: 0 },
+    correctKnowledgeAnswer: async (id, payload) => { corrected = { id, payload }; return { id, status: 'accepted', attempts: 0 }; },
+  });
+  let root;
+  await act(async () => { root = renderer.create(React.createElement(Component, { sourceId: 'gap' })); });
+  assert.match(text(root), /Your answer has not been ingested/);
+  assert.match(text(root), /Reason: the location needs correction/);
+  assert.match(text(root), /Changing the selection alone does not restart publication/);
+  assert.equal(root.root.findByProps({ 'aria-label': 'Resolve knowledge record' }).findAllByProps({ 'aria-label': 'Conflicting answer' }).length, 0);
+  act(() => root.root.findByProps({ type: 'radio', value: 'national' }).props.onChange());
+  await act(async () => { await root.root.findByType('form').props.onSubmit({ preventDefault() {} }); });
+  assert.equal(corrected.id, 'location-job');
+  assert.equal(corrected.payload.applicability.scope, 'national');
+  assert.equal(corrected.payload.applicability.municipality_code, null);
+  assert.equal(corrected.payload.answer, saved.answer);
+  act(() => root.unmount());
+});

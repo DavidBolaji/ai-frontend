@@ -191,6 +191,11 @@ export default function KnowledgeResolution({ sourceId, source = 'gap', onStatus
   const available = resolution?.status === 'available';
   const correctionBlocked = Boolean(resolution && ['failed', 'review_needed'].includes(resolution.status) && resolution.can_correct === false);
   const fieldsDisabled = loading || submitting || active || available || correctionBlocked;
+  const locationHold = Boolean(resolution && ['failed', 'review_needed'].includes(resolution.status) && (
+    resolution.failure?.fields?.includes('applicability') ||
+    ['review_needed:locality_scope_mismatch', 'review_needed:missing_municipality_code'].includes(resolution.error || '')
+  ));
+  const savedMunicipality = MUNICIPALITIES.find(place => place.code === resolution?.applicability?.municipality_code)?.name;
   const written = Array.from(answer).length;
   const tooLong = written > 5000;
   // The button is disabled for several different reasons; say which one applies,
@@ -202,10 +207,26 @@ export default function KnowledgeResolution({ sourceId, source = 'gap', onStatus
   return <section aria-label="Resolve knowledge record">
     <h3>Provide the correct answer</h3>
     {resolution && !resolution.failure && resolution.error && <p role="alert">{resolution.issue || 'Processing stopped. Your answer is saved. The cause needs investigation.'} Submission: {resolution.id}</p>}
-    {resolution?.failure && <div role="alert">
-      <strong>{resolution.failure.owner === 'submitter' ? 'Correction needed' : 'Processing needs attention'}</strong>
-      <p>{resolution.failure.message}</p>
-      <p>Submission: {resolution.id}{resolution.failure.stage ? ` · Step: ${resolution.failure.stage}` : ''}</p>
+    {resolution?.failure && <div role="alert" className={styles.ingestionBlocked} aria-labelledby={`blocked-title-${sourceId}`}>
+      <span className={styles.blockedBadge}>Publication blocked</span>
+      <h4 id={`blocked-title-${sourceId}`}>Your answer has not been ingested</h4>
+      <p>Your submitted answer is saved, but this submission is not available to the assistant yet.</p>
+      <div className={styles.blockedReason}>
+        <strong>{locationHold ? 'Reason: the location needs correction' : 'Reason processing stopped'}</strong>
+        <p>{resolution.failure.message}</p>
+      </div>
+      {locationHold && <>
+        <p><strong>Saved applicability:</strong> {resolution.applicability?.scope === 'national' ? 'Across the Netherlands' : savedMunicipality || 'A specific location'}.</p>
+        <ol>
+          <li>Check where this answer applies in the highlighted section below.</li>
+          <li>For nationwide guidance, choose <strong>Across the Netherlands</strong>. For local guidance, select the correct municipality.</li>
+          <li>Click <strong>Save corrections and retry</strong>. Publication will be checked again.</li>
+        </ol>
+        <p>Changing the selection alone does not restart publication. If the same location error returns after you save the correct scope, share the submission details below with an operator.</p>
+      </>}
+      <details className={styles.blockedDetails}><summary>Submission details</summary>
+        <p>Submission: {resolution.id}{resolution.failure.stage ? ` · Step: ${resolution.failure.stage}` : ''}</p>
+      </details>
       {resolution.failure.owner === 'operator' && !resolution.failure.retryable && <p>No answer edit is known to resolve this issue. Share this submission ID with an operator.</p>}
     </div>}
     {resolution?.status === 'failed' && resolution.can_retry && resolution.failure?.retryable && <div role="alert" className={styles.retryNotice}>
@@ -234,8 +255,10 @@ export default function KnowledgeResolution({ sourceId, source = 'gap', onStatus
     {formError && resolution?.failure?.action !== 'review_conflict' && <p role="alert">{formError}</p>}
     {correctionBlocked && !resolution?.failure?.retryable && <p role="alert">This job cannot be edited because publication has started or it is no longer correctable. Share submission {resolution?.id} with an operator to reconcile its publication.</p>}
     <form onSubmit={submit}>
-      <fieldset className={styles.applicability} disabled={fieldsDisabled}>
+      <fieldset className={`${styles.applicability} ${locationHold ? styles.applicabilityBlocked : ''}`} disabled={fieldsDisabled}
+        aria-describedby={locationHold ? `applicability-help-${sourceId}` : undefined}>
         <legend>Where does this answer apply?</legend>
+        {locationHold && <p id={`applicability-help-${sourceId}`} className={styles.applicabilityHelp}>Correction required: confirm the scope and location, then save corrections to retry publication.</p>}
         <div className={styles.scopeChoices}>
           {[['national', 'Across the Netherlands'], ['municipality', 'A specific location']].map(([value, label]) =>
             <label key={value} className={`${styles.scopeChoice} ${scope === value ? styles.scopeSelected : ''}`}>

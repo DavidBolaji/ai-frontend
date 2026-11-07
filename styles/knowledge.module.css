@@ -357,3 +357,16 @@
 .conflictPanel .conflictSecondaryButton:hover:not(:disabled){background:#f1f6f3}
 .conflictPanel button:disabled{background:#edf1ee;color:#829087;border-color:#dfe6e1;cursor:not-allowed}
 .conflictPanel button:focus-visible{outline:2px solid #18734f;outline-offset:3px}
+
+.ingestionBlocked{margin:16px 0 24px;padding:20px;border:1px solid #e8ada5;border-left:5px solid #b42318;border-radius:10px;background:#fff4f2;color:#61231e;overflow-wrap:anywhere}
+.blockedBadge{display:inline-block;padding:4px 9px;border-radius:5px;background:#b42318;color:#fff;font-size:12px;font-weight:700}
+.ingestionBlocked h4{margin:12px 0 8px;font-size:20px;line-height:1.35;color:#8f2017}
+.ingestionBlocked p{margin:8px 0;line-height:1.6}
+.blockedReason{margin:16px 0;padding:12px;background:#fff;border:1px solid #efcbc6;border-radius:6px}
+.ingestionBlocked ol{padding-left:22px;line-height:1.7}
+.ingestionBlocked li+li{margin-top:8px}
+.blockedDetails{margin-top:16px;font-size:12px}
+.blockedDetails summary{cursor:pointer;font-weight:600}
+.applicability.applicabilityBlocked{padding:16px;border:2px solid #bd5b19;border-radius:10px;background:#fffaf0}
+.applicabilityHelp{margin:0 0 14px;color:#85400e;font-size:14px;line-height:1.6;font-weight:600}
+@media(max-width:600px){.ingestionBlocked{padding:16px}.ingestionBlocked h4{font-size:18px}}
