@@ -365,8 +365,22 @@
 .blockedReason{margin:16px 0;padding:12px;background:#fff;border:1px solid #efcbc6;border-radius:6px}
 .ingestionBlocked ol{padding-left:22px;line-height:1.7}
 .ingestionBlocked li+li{margin-top:8px}
-.blockedDetails{margin-top:16px;font-size:12px}
-.blockedDetails summary{cursor:pointer;font-weight:600}
 .applicability.applicabilityBlocked{padding:16px;border:2px solid #bd5b19;border-radius:10px;background:#fffaf0}
 .applicabilityHelp{margin:0 0 14px;color:#85400e;font-size:14px;line-height:1.6;font-weight:600}
 @media(max-width:600px){.ingestionBlocked{padding:16px}.ingestionBlocked h4{font-size:18px}}
+
+.matchReview{margin-top:16px;display:flex;flex-direction:column;align-items:flex-start;gap:14px;color:#34453e}
+.matchChoices{border:0;padding:0;margin:0;width:100%;display:flex;flex-direction:column;gap:8px;min-width:0}
+.matchChoices legend{font-size:13px;font-weight:600;margin-bottom:8px}
+.matchChoices label{display:flex;align-items:center;gap:10px;border:1px solid #d9dedb;border-radius:8px;background:#fff;padding:12px;font-size:14px;cursor:pointer}
+.matchChoices label.matchSelected{border-color:#176b4c;background:#f1f7f3}
+.matchChoices input{width:16px;height:16px;flex-shrink:0;accent-color:#176b4c}
+.matchDocument{width:100%;min-width:0;background:#fff;border:1px solid #d9dedb;border-radius:8px;padding:12px;box-sizing:border-box}
+.matchDocument label{display:block;font-size:13px;font-weight:600;margin-bottom:8px}
+.matchDocument select{width:100%;max-width:100%;border:1px solid #cddbd2;border-radius:6px;padding:10px;background:#fff;color:#21312e;font:inherit}
+.matchDocument p{font-size:13px;color:#52645b}
+.reviewDocumentsButton,.revalidateButton{font:inherit;font-size:14px;font-weight:600;border-radius:8px;padding:10px 14px;cursor:pointer;line-height:1.4}
+.reviewDocumentsButton{background:#fff;border:1px solid #cddbd2;color:#285a43}
+.revalidateButton{background:#176b4c;border:1px solid #176b4c;color:#fff}
+.matchReview button:disabled{opacity:.55;cursor:not-allowed}
+.matchReview :is(button,select,input):focus-visible{outline:2px solid #18734f;outline-offset:3px}

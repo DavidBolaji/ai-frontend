@@ -404,3 +404,64 @@ test('location hold explains blocked ingestion and saves national applicability 
   assert.equal(corrected.payload.answer, saved.answer);
   act(() => root.unmount());
 });
+
+test('ambiguous document matches show model feedback and revalidate the same submission', async () => {
+  let current = {id: 'held-match', status: 'review_needed', attempts: 0, answer: 'The distinct QA desk is in Rijswijk.', question: 'Where is the QA desk?', applicability: {scope: 'municipality', municipality_code: 'GM0603'}, model_explanation: 'The names may describe different desks.', failure: {action: 'review_relationship', owner: 'submitter', stage: 'classify_submission', message: 'Clarify the intended subject.'}};
+  let calls = 0;
+  let finish;
+  const api = {
+    readKnowledge: async params => params.operation === 'conflictReview' ? {review_kind: 'relationship', candidates: [{record_id: 'old-desk', row_hash: 'a'.repeat(64), question: 'Where is the Test Desk?', answer: 'The Test Desk is in Rijswijk.'}], model_explanation: current.model_explanation} : params.operation === 'resolutionLatest' ? {resolution: current} : current,
+    correctKnowledgeAnswer: async (id, values, key) => {
+      calls++;
+      assert.equal(id, 'held-match');
+      assert.equal(values.relationship_review.kind, 'new');
+      assert.equal(values.relationship_review.reason, undefined);
+      assert.equal(values.applicability.municipality_code, 'GM0603');
+      assert.ok(key);
+      return new Promise(resolve => { finish = () => {current = {...current, status: 'accepted', failure: null}; resolve(current);}; });
+    },
+  };
+  const {Component} = setup(api);
+  let root;
+  await act(async () => {root = renderer.create(React.createElement(Component, {sourceId: 'gap'}));});
+  assert.match(text(root), /The names may describe different desks/);
+  assert.doesNotMatch(text(root), /No answer edit is known/);
+  const button = label => root.root.findAllByType('button').find(node => node.children.join('') === label);
+  await act(async () => {await button('Review documents').props.onClick();});
+  assert.match(text(root), /Correcting an existing document/);
+  assert.doesNotMatch(text(root), /Submission details|Explain the subject|Clarify which document/);
+  act(() => root.root.findAllByType('input').find(node => node.props.name === 'match-gap' && node.props.value === 'new').props.onChange());
+  let pending;
+  act(() => {pending = button('Save clarification and revalidate').props.onClick(); button('Save clarification and revalidate').props.onClick();});
+  assert.equal(calls, 1);
+  await act(async () => {finish(); await pending;});
+  assert.equal(calls, 1);
+  assert.doesNotMatch(text(root), /Clarify which document/);
+  act(() => root.unmount());
+});
+
+test('existing-document choice shows one preview and submits its version without an explanation field', async () => {
+  let current = {id: 'held-existing', status: 'review_needed', attempts: 0, answer: 'Updated office hours.', question: 'When does the office open?', applicability: {scope: 'national'}, failure: {action: 'review_relationship', owner: 'submitter', message: 'Choose the intended document.'}};
+  let saved;
+  const api = {
+    readKnowledge: async params => params.operation === 'conflictReview' ? {review_kind: 'relationship', candidates: [{record_id: 'a', row_hash: 'a'.repeat(64), question: 'Office A', answer: 'Office A opens early.'}, {record_id: 'b', row_hash: 'b'.repeat(64), question: 'Office B', answer: 'Office B opens late.'}]} : params.operation === 'resolutionLatest' ? {resolution: current} : current,
+    correctKnowledgeAnswer: async (id, values) => {saved = {id, values}; current = {...current, status: 'accepted', failure: null}; return current;},
+  };
+  const {Component} = setup(api);
+  let root;
+  await act(async () => {root = renderer.create(React.createElement(Component, {sourceId: 'gap'}));});
+  const button = label => root.root.findAllByType('button').find(node => node.children.join('') === label);
+  await act(async () => {await button('Review documents').props.onClick();});
+  act(() => root.root.findAllByType('input').find(node => node.props.name === 'match-gap' && node.props.value === 'existing').props.onChange());
+  assert.equal(button('Save clarification and revalidate').props.disabled, true);
+  act(() => root.root.findByProps({id: 'match-document-gap'}).props.onChange({target: {value: 'b'}}));
+  assert.match(text(root), /Office B opens late/);
+  assert.doesNotMatch(text(root), /Office A opens early|Explain the subject|Submission details/);
+  await act(async () => {await button('Save clarification and revalidate').props.onClick();});
+  assert.equal(saved.id, 'held-existing');
+  assert.equal(saved.values.relationship_review.kind, 'existing');
+  assert.equal(saved.values.relationship_review.record_id, 'b');
+  assert.equal(saved.values.relationship_review.expected_row_hash, 'b'.repeat(64));
+  assert.equal(saved.values.relationship_review.reason, undefined);
+  act(() => root.unmount());
+});

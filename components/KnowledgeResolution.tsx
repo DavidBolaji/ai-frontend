@@ -5,7 +5,7 @@ import styles from '@/styles/knowledge.module.css';
 import type { ApiError } from '@/lib/types';
 import { MAX_SOURCE_URLS, MAX_URL_LENGTH, normaliseSourceUrls, urlProblem } from '@/lib/source-urls';
 
-export type Resolution = { id: string; status: string; attempts: number; question?: string; answer?: string; source_url?: string; source_urls?: string[]; action_url?: string; action_label?: string; error?: string | null; can_correct?: boolean; can_retry?: boolean; issue?: string; applicability?: { scope: string; municipality_code?: string | null }; failure?: { message: string; owner?: string; stage?: string; action?: string; retryable?: boolean; fields?: string[] } | null };
+export type Resolution = { id: string; status: string; attempts: number; question?: string; answer?: string; source_url?: string; source_urls?: string[]; action_url?: string; action_label?: string; error?: string | null; can_correct?: boolean; can_retry?: boolean; issue?: string; model_explanation?: string; applicability?: { scope: string; municipality_code?: string | null }; failure?: { message: string; owner?: string; stage?: string; action?: string; retryable?: boolean; fields?: string[] } | null };
 const terminal = new Set(['available', 'review_needed', 'failed', 'superseded', 'deleted']);
 
 export type Notice = { title: string; body: string; variant?: 'error' | 'success' | 'info' };
@@ -19,6 +19,9 @@ export default function KnowledgeResolution({ sourceId, source = 'gap', onStatus
   const [locationError, setLocationError] = useState('');
   const [formError, setFormError] = useState('');
   const [conflict, setConflict] = useState<{existing_record: {record_id: string; row_hash: string; question: string; answer: string}; submitted_answer: string; conflicts?: string[]} | null>(null);
+  const [matchReview, setMatchReview] = useState<{ candidates: {record_id: string; row_hash: string; question: string; answer: string}[]; model_explanation?: string } | null>(null);
+  const [matchChoice, setMatchChoice] = useState('');
+  const [matchDocument, setMatchDocument] = useState('');
   const [overwriteReason, setOverwriteReason] = useState('');
   const [finalAnswer, setFinalAnswer] = useState('');
   const [overwriteConfirmed, setOverwriteConfirmed] = useState(false);
@@ -162,12 +165,39 @@ export default function KnowledgeResolution({ sourceId, source = 'gap', onStatus
     locked.current = true; setSubmitting(true); setFormError('');
     try {
       const data = await apiClient.readKnowledge({ operation: 'conflictReview', id: resolution.id });
-      if (mounted.current) { setConflict(data); setFinalAnswer(data.submitted_answer); setOverwriteConfirmed(false); setOverwriteReason(''); }
+      if (mounted.current) {
+        if (data.review_kind === 'relationship') { setMatchReview(data); setMatchChoice(''); setMatchDocument(data.candidates.length === 1 ? data.candidates[0].record_id : ''); }
+        else { setConflict(data); setFinalAnswer(data.submitted_answer); setOverwriteConfirmed(false); setOverwriteReason(''); }
+      }
     } catch (error) {
       if (mounted.current) {
         const message = (error as ApiError)?.errors?.[0]?.detail || 'Unable to load the current record.';
         setFormError(message); notify('Unable to compare answers', message);
       }
+    } finally { locked.current = false; if (mounted.current) setSubmitting(false); }
+  }
+
+  async function clarifyMatch() {
+    if (!resolution || !matchReview || !matchChoice || locked.current || !scope || (scope === 'municipality' && !municipality)) return;
+    const selected = matchChoice === 'existing' ? matchReview.candidates.find(item => item.record_id === matchDocument) : undefined;
+    if (matchChoice === 'existing' && !selected) return;
+    locked.current = true; setSubmitting(true); setFormError('');
+    const relationship_review = { kind: selected ? 'existing' : 'new', ...(selected ? { record_id: selected.record_id, expected_row_hash: selected.row_hash } : {}) };
+    const values = { answer: answer.trim(), ...(question.trim() ? {question: question.trim()} : {}), applicability: { scope, municipality_code: scope === 'municipality' ? municipality : null }, relationship_review,
+      ...(resolution.source_urls?.length ? {source_urls: resolution.source_urls} : resolution.source_url ? {source_url: resolution.source_url} : {}),
+      ...(resolution.action_url ? {action_url: resolution.action_url, action_label: resolution.action_label} : {}) };
+    const identity = JSON.stringify(values);
+    if (!submission.current || submission.current.answer !== identity) submission.current = {answer: identity, key: crypto.randomUUID()};
+    try {
+      const current = await apiClient.correctKnowledgeAnswer(resolution.id, values, submission.current.key);
+      if (mounted.current) {
+        tracking.current = resolution.id; setResolution(current); setMatchReview(null); submission.current = null;
+        callbacks.current.onStatusChange?.(current);
+        callbacks.current.onNotice?.({title: 'Clarification saved', body: 'The same submission will be checked by the model again. Publication still requires validation.', variant: 'success'});
+        setPollVersion(v => v + 1);
+      }
+    } catch (error) {
+      if (mounted.current) { setMatchReview(null); setMatchChoice(''); setFormError((error as ApiError)?.errors?.[0]?.detail || 'Unable to save the clarification. Your answer is kept.'); }
     } finally { locked.current = false; if (mounted.current) setSubmitting(false); }
   }
 
@@ -213,7 +243,7 @@ export default function KnowledgeResolution({ sourceId, source = 'gap', onStatus
       <p>Your submitted answer is saved, but this submission is not available to the assistant yet.</p>
       <div className={styles.blockedReason}>
         <strong>{locationHold ? 'Reason: the location needs correction' : 'Reason processing stopped'}</strong>
-        <p>{resolution.failure.message}</p>
+        <p>{resolution.model_explanation || resolution.failure.message}</p>
       </div>
       {locationHold && <>
         <p><strong>Saved applicability:</strong> {resolution.applicability?.scope === 'national' ? 'Across the Netherlands' : savedMunicipality || 'A specific location'}.</p>
@@ -222,13 +252,28 @@ export default function KnowledgeResolution({ sourceId, source = 'gap', onStatus
           <li>For nationwide guidance, choose <strong>Across the Netherlands</strong>. For local guidance, select the correct municipality.</li>
           <li>Click <strong>Save corrections and retry</strong>. Publication will be checked again.</li>
         </ol>
-        <p>Changing the selection alone does not restart publication. If the same location error returns after you save the correct scope, share the submission details below with an operator.</p>
+        <p>Changing the selection alone does not restart publication. If the same location error returns after you save the correct scope, contact an operator.</p>
       </>}
-      <details className={styles.blockedDetails}><summary>Submission details</summary>
-        <p>Submission: {resolution.id}{resolution.failure.stage ? ` · Step: ${resolution.failure.stage}` : ''}</p>
-        {resolution.failure.owner && <p>Next action owner: {resolution.failure.owner === 'submitter' ? 'Staff reviewer' : resolution.failure.owner === 'system' ? 'Automatic processing' : 'Operator'}.</p>}
-      </details>
-      {resolution.failure.owner === 'operator' && !resolution.failure.retryable && <p>No answer edit is known to resolve this issue. Share this submission ID with an operator.</p>}
+      {resolution.status === 'review_needed' && resolution.failure.action === 'review_relationship' && <div className={styles.matchReview} aria-label="Document match review">
+        {!matchReview ? <button className={styles.reviewDocumentsButton} type="button" disabled={submitting || loading} onClick={() => void reviewConflict()}>{submitting ? 'Loading documents…' : 'Review documents'}</button> : <>
+          <fieldset className={styles.matchChoices} disabled={submitting}>
+            <legend>This answer is:</legend>
+            <label className={matchChoice === 'new' ? styles.matchSelected : ''}><input type="radio" name={`match-${sourceId}`} value="new" checked={matchChoice === 'new'} onChange={() => setMatchChoice('new')} /> New knowledge</label>
+            <label className={matchChoice === 'existing' ? styles.matchSelected : ''}><input type="radio" name={`match-${sourceId}`} value="existing" checked={matchChoice === 'existing'} onChange={() => setMatchChoice('existing')} /> Correcting an existing document</label>
+          </fieldset>
+          {matchChoice === 'existing' && <div className={styles.matchDocument}>
+            <label htmlFor={`match-document-${sourceId}`}>Existing document</label>
+            <select id={`match-document-${sourceId}`} value={matchDocument} disabled={submitting} onChange={event => setMatchDocument(event.target.value)}>
+              <option value="">Choose a document</option>
+              {matchReview.candidates.map(item => <option key={item.record_id} value={item.record_id}>{item.question}</option>)}
+            </select>
+            {matchReview.candidates.find(item => item.record_id === matchDocument) && <p>{matchReview.candidates.find(item => item.record_id === matchDocument)!.answer}</p>}
+            {!matchReview.candidates.length && <p>No current document is available. Refresh the review or edit the submission.</p>}
+          </div>}
+          <button className={styles.revalidateButton} type="button" disabled={submitting || !matchChoice || (matchChoice === 'existing' && !matchDocument)} onClick={() => void clarifyMatch()}>Save clarification and revalidate</button>
+        </>}
+      </div>}
+      {resolution.failure.owner === 'operator' && !resolution.failure.retryable && <p>No answer edit is known to resolve this issue. Contact an operator for help.</p>}
     </div>}
     {resolution?.status === 'failed' && resolution.can_retry && resolution.failure?.retryable && <div role="alert" className={styles.retryNotice}>
       <strong>Your answer is saved — processing was interrupted.</strong>
