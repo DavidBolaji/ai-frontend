@@ -10,6 +10,32 @@ const terminal = new Set(['available', 'review_needed', 'failed', 'superseded', 
 
 export type Notice = { title: string; body: string; variant?: 'error' | 'success' | 'info' };
 
+function ReviewFeedback({ text, documents = [] }: { text: string; documents?: {label: string; title: string}[] }) {
+  const parts = text.replace(/\bTwo documents are only partially related\b/gi, 'Two documents are partially related').split(/\n\s*\n|\n/).map(part => part.trim()).filter(Boolean);
+  const comparisons: { number: number; body: string; label: string }[] = [];
+  const overview: string[] = [];
+  const actions: string[] = [];
+  for (const part of parts) {
+    const match = /^Document (\d+)\s+([\s\S]*)$/.exec(part);
+    if (match) comparisons.push({number: Number(match[1]), body: match[2], label: `Document ${match[1]}`});
+    else if (/^(?:Please|Confirm|Clarify)\b/i.test(part) || actions.length) actions.push(part);
+    else if (comparisons.length) comparisons[comparisons.length - 1].body += `\n\n${part}`;
+    else overview.push(part);
+  }
+  comparisons.sort((a, b) => a.number - b.number);
+  return <div className={styles.reviewFeedback}>
+    {overview.map((part, index) => <p key={index}>{part}</p>)}
+    {comparisons.length > 0 && <ul className={styles.feedbackComparisons}>
+      {comparisons.map((document, index) => <li key={index}>
+        <strong>{document.label}</strong>
+        {documents.find(item => item.label === document.label)?.title && <span className={styles.feedbackTitle}>{documents.find(item => item.label === document.label)!.title}</span>}
+        {document.body.split('\n\n').map((part, partIndex) => <p key={partIndex}>{part}</p>)}
+      </li>)}
+    </ul>}
+    {actions.length > 0 && <div className={styles.feedbackAction}>{actions.map((part, index) => <p key={index}>{part}</p>)}</div>}
+  </div>;
+}
+
 export default function KnowledgeResolution({ sourceId, source = 'gap', onStatusChange, onSubmitted, onNotice, initialApplicability, initialResolution }: { initialResolution?: Resolution | null; initialApplicability?: { scope: string; municipality?: string; municipality_code?: string | null }; sourceId: string; source?: 'gap' | 'feedback' | 'vote'; onStatusChange?: (resolution: Resolution | null) => void; onSubmitted?: (resolution: Resolution) => void; onNotice?: (notice: Notice) => void }) {
   const [answer, setAnswer] = useState('');
   const [question, setQuestion] = useState('');
@@ -243,10 +269,7 @@ export default function KnowledgeResolution({ sourceId, source = 'gap', onStatus
       <p>Your submitted answer is saved, but this submission is not available to the assistant yet.</p>
       <div className={styles.blockedReason}>
         <strong>{locationHold ? 'Reason: the location needs correction' : 'Reason processing stopped'}</strong>
-        {(resolution.model_explanation || resolution.failure.message).split(/\n\s*\n|\n/).filter(part => part.trim()).map((part, index) => <p key={index}>{part}</p>)}
-        {Boolean(resolution.model_documents?.length) && <ul className={styles.feedbackDocuments}>
-          {resolution.model_documents!.map(document => <li key={document.label}><strong>{document.label}:</strong> {document.title}</li>)}
-        </ul>}
+        <ReviewFeedback text={resolution.model_explanation || resolution.failure.message} documents={resolution.model_documents} />
       </div>
       {locationHold && <>
         <p><strong>Saved applicability:</strong> {resolution.applicability?.scope === 'national' ? 'Across the Netherlands' : savedMunicipality || 'A specific location'}.</p>

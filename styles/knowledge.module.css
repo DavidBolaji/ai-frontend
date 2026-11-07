@@ -385,5 +385,12 @@
 .matchReview button:disabled{opacity:.55;cursor:not-allowed}
 .matchReview :is(button,select,input):focus-visible{outline:2px solid #18734f;outline-offset:3px}
 
-.feedbackDocuments{margin:12px 0 0;padding-left:20px;font-size:13px;line-height:1.6}
-.feedbackDocuments li+li{margin-top:8px}
+
+.reviewFeedback{color:#34453e;font-size:14px}
+.feedbackComparisons{list-style:none;padding:0;margin:14px 0;display:grid;gap:10px}
+.feedbackComparisons li{padding:12px 14px;border:1px solid #e0e6e2;border-radius:8px;background:#f8faf9}
+.feedbackComparisons strong{display:block;color:#213e30;font-size:13px}
+.feedbackTitle{display:block;margin-top:4px;font-size:13px;color:#52645b}
+.ingestionBlocked .feedbackComparisons p{margin:6px 0 0}
+.feedbackAction{margin-top:14px;padding-top:12px;border-top:1px solid #e0e6e2;color:#34453e;font-weight:500}
+.ingestionBlocked .feedbackAction p{margin:0}
