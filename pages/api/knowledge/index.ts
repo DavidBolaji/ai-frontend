@@ -125,8 +125,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (body.data.type !== 'knowledge-resolutions') return failure(res, 409, 'Expected resource type knowledge-resolutions.', '/data/type');
     if ('id' in body.data || 'lid' in body.data) return failure(res, 403, 'Resolution IDs are assigned by the server.', '/data/id');
     const attrs = body.data.attributes;
-    if (!attrs || typeof attrs !== 'object' || Array.isArray(attrs) || typeof attrs.answer !== 'string' || !attrs.answer.trim() || Array.from(attrs.answer).length > 5000 || Object.keys(attrs).some(k => !['answer', 'source_url', 'source_urls', 'action_url', 'action_label', 'applicability', ...(operation === 'correct' ? ['question'] : [])].includes(k)))
+    if (!attrs || typeof attrs !== 'object' || Array.isArray(attrs) || typeof attrs.answer !== 'string' || !attrs.answer.trim() || Array.from(attrs.answer).length > 5000 || Object.keys(attrs).some(k => !['answer', 'source_url', 'source_urls', 'action_url', 'action_label', 'applicability', ...(operation === 'correct' ? ['question', 'relationship_review'] : [])].includes(k)))
       return failure(res, 422, 'Enter an answer of at most 5,000 characters. Use the optional source and action fields for links.', '/data/attributes/answer');
+    if (attrs.relationship_review !== undefined) {
+      const review = attrs.relationship_review;
+      if (!review || typeof review !== 'object' || Array.isArray(review) || Object.keys(review).some(k => !['kind', 'reason', 'record_id', 'expected_row_hash'].includes(k)) || !['new', 'existing'].includes(review.kind) || (review.reason !== undefined && (typeof review.reason !== 'string' || review.reason.length > 2000)) || (review.kind === 'existing' ? typeof review.record_id !== 'string' || !review.record_id || review.record_id.length > 100 || !/^[a-f0-9]{64}$/.test(review.expected_row_hash || '') : review.record_id !== undefined || review.expected_row_hash !== undefined))
+        return failure(res, 422, 'Choose new knowledge or select a current existing document.', '/data/attributes/relationship_review');
+    }
     if (attrs.question !== undefined && (typeof attrs.question !== 'string' || !attrs.question.trim() || Array.from(attrs.question).length > 2000)) return failure(res, 422, 'Enter a question of at most 2,000 characters.', '/data/attributes/question');
     if (attrs.applicability !== undefined) {
       const a = attrs.applicability;

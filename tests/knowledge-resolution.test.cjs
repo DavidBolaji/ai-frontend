@@ -504,6 +504,9 @@ for (const missingScope of [true, false]) {
     await act(async () => {await button('Save clarification and revalidate').props.onClick();});
     assert.match(text(root), missingScope ? /Choose where this answer applies before revalidating/ : /Validation is temporarily unavailable/);
     assert.equal(calls, missingScope ? 0 : 1);
+    assert.equal(root.root.findAllByType('input').find(node => node.props.name === 'match-gap' && node.props.value === 'new').props.checked, true);
+    assert.ok(button('Save clarification and revalidate'));
+    assert.equal(button('Review documents'), undefined);
     assert.doesNotMatch(text(root), /Saving clarification…/);
     act(() => root.unmount());
   });

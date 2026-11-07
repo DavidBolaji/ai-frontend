@@ -242,3 +242,23 @@ test('overwrite forwards version-bound approval without creating a submission', 
   assert.equal(new URL(called.url).pathname, `/api/v1/ops/queues/jobs/${id}/force-approve`);
   assert.equal(JSON.parse(called.options.body).data.attributes.expected_row_hash,'a'.repeat(64));
 });
+
+test('clarification choices pass through the real correction proxy unchanged', async () => {
+  for (const relationship_review of [{kind: 'new'}, {kind: 'existing', record_id: 'staff-desk', expected_row_hash: 'a'.repeat(64)}]) {
+    let forwarded;
+    const {handler, res} = setup(async (url, options) => {forwarded = {url, body: JSON.parse(options.body)}; return {ok: true, status: 202, json: async () => doc()};});
+    const body = {data: {type: 'knowledge-resolutions', attributes: {answer: 'Reviewed desk answer', applicability: {scope: 'national'}, relationship_review}}};
+    await handler(request('correct', {method: 'POST', query: {sourceId: id}, headers: {'idempotency-key': 'clarify-same-job'}, body}), res);
+    assert.equal(res.code, 202, JSON.stringify(res.body));
+    assert.ok(forwarded.url.endsWith(`/admin/kaya/knowledge/resolutions/${id}/correct`));
+    assert.deepEqual(forwarded.body.data.attributes.relationship_review, relationship_review);
+  }
+});
+
+test('correction proxy rejects incomplete or unexpected document choices', async () => {
+  for (const relationship_review of [{kind: 'existing'}, {kind: 'new', record_id: 'unexpected'}, {kind: 'new', force_approve: true}]) {
+    const {handler, res} = setup(() => assert.fail('invalid clarification must not reach backend'));
+    await handler(request('correct', {method: 'POST', query: {sourceId: id}, headers: {'idempotency-key': 'invalid-choice'}, body: {data: {type: 'knowledge-resolutions', attributes: {answer: 'Saved answer', relationship_review}}}}), res);
+    assertError(res, 422);
+  }
+});

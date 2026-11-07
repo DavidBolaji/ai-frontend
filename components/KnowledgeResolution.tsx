@@ -226,13 +226,13 @@ export default function KnowledgeResolution({ sourceId, source = 'gap', onStatus
     try {
       const current = await apiClient.correctKnowledgeAnswer(resolution.id, values, submission.current.key);
       if (mounted.current) {
-        tracking.current = resolution.id; setResolution(current); setMatchReview(null); submission.current = null;
+        tracking.current = resolution.id; setResolution(current); submission.current = null;
         callbacks.current.onStatusChange?.(current);
         callbacks.current.onNotice?.({title: 'Clarification saved', body: 'The same submission will be checked by the model again. Publication still requires validation.', variant: 'success'});
         setPollVersion(v => v + 1);
       }
     } catch (error) {
-      if (mounted.current) { setRevalidationRequested(false); setMatchReview(null); setMatchChoice(''); setFormError((error as ApiError)?.errors?.[0]?.detail || 'Unable to save the clarification. Your answer is kept.'); }
+      if (mounted.current) { setRevalidationRequested(false); setFormError((error as ApiError)?.errors?.[0]?.detail || 'Unable to save the clarification. Your answer is kept.'); }
     } finally { locked.current = false; if (mounted.current) { setSavingClarification(false); setSubmitting(false); } }
   }
 
@@ -311,6 +311,7 @@ export default function KnowledgeResolution({ sourceId, source = 'gap', onStatus
             {matchReview.candidates.find(item => item.record_id === matchDocument) && <p>{matchReview.candidates.find(item => item.record_id === matchDocument)!.answer}</p>}
             {!matchReview.candidates.length && <p>No current document is available. Refresh the review or edit the submission.</p>}
           </div>}
+          {formError && <div><p role="alert">{formError}</p><button className={styles.reviewDocumentsButton} type="button" disabled={submitting} onClick={() => void reviewConflict()}>Reload documents</button></div>}
           <button className={styles.revalidateButton} type="button" disabled={submitting || !matchChoice || (matchChoice === 'existing' && !matchDocument)} onClick={() => void clarifyMatch()}>{submitting ? 'Saving clarification…' : 'Save clarification and revalidate'}</button>
         </>}
       </div>}
@@ -339,7 +340,7 @@ export default function KnowledgeResolution({ sourceId, source = 'gap', onStatus
         <p className={styles.conflictHint}>The existing document will be updated. Its previous version is kept in the history.</p>
       </>}
     </section>}
-    {formError && resolution?.failure?.action !== 'review_conflict' && <p role="alert">{formError}</p>}
+    {formError && resolution?.failure?.action !== 'review_conflict' && !(resolution?.failure?.action === 'review_relationship' && matchReview) && <p role="alert">{formError}</p>}
     {correctionBlocked && !resolution?.failure?.retryable && <p role="alert">This job cannot be edited because publication has started or it is no longer correctable. Share submission {resolution?.id} with an operator to reconcile its publication.</p>}
     <form onSubmit={submit}>
       <fieldset className={`${styles.applicability} ${locationHold ? styles.applicabilityBlocked : ''}`} disabled={fieldsDisabled}
