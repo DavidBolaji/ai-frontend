@@ -465,3 +465,17 @@ test('existing-document choice shows one preview and submits its version without
   assert.equal(saved.values.relationship_review.reason, undefined);
   act(() => root.unmount());
 });
+
+test('document feedback renders as separate paragraphs with a numbered title list', async () => {
+  const current = {id: 'readable-feedback', status: 'review_needed', answer: 'Reviewed answer', question: 'Where is the desk?', attempts: 0, model_explanation: 'Two documents are partially related.\n\nDocument 1 describes the Test Desk.\n\nDocument 2 describes another desk.\n\nPlease confirm which desk you mean.', model_documents: [{label: 'Document 1', title: 'Blue Finch Test Desk'}, {label: 'Document 2', title: 'Silver Kite Test Desk'}], failure: {action: 'review_relationship', message: 'Review the document match.'}};
+  const {Component} = setup({readKnowledge: async () => ({resolution: current})});
+  let root;
+  await act(async () => {root = renderer.create(React.createElement(Component, {sourceId: 'gap'}));});
+  const paragraphs = root.root.findAllByType('p').map(node => node.children.join(''));
+  assert.ok(paragraphs.includes('Document 1 describes the Test Desk.'));
+  assert.ok(paragraphs.includes('Document 2 describes another desk.'));
+  assert.ok(paragraphs.includes('Please confirm which desk you mean.'));
+  assert.match(text(root), /Blue Finch Test Desk/);
+  assert.match(text(root), /Silver Kite Test Desk/);
+  act(() => root.unmount());
+});

@@ -5,7 +5,7 @@ import styles from '@/styles/knowledge.module.css';
 import type { ApiError } from '@/lib/types';
 import { MAX_SOURCE_URLS, MAX_URL_LENGTH, normaliseSourceUrls, urlProblem } from '@/lib/source-urls';
 
-export type Resolution = { id: string; status: string; attempts: number; question?: string; answer?: string; source_url?: string; source_urls?: string[]; action_url?: string; action_label?: string; error?: string | null; can_correct?: boolean; can_retry?: boolean; issue?: string; model_explanation?: string; applicability?: { scope: string; municipality_code?: string | null }; failure?: { message: string; owner?: string; stage?: string; action?: string; retryable?: boolean; fields?: string[] } | null };
+export type Resolution = { id: string; status: string; attempts: number; question?: string; answer?: string; source_url?: string; source_urls?: string[]; action_url?: string; action_label?: string; error?: string | null; can_correct?: boolean; can_retry?: boolean; issue?: string; model_explanation?: string; model_documents?: {label: string; title: string}[]; applicability?: { scope: string; municipality_code?: string | null }; failure?: { message: string; owner?: string; stage?: string; action?: string; retryable?: boolean; fields?: string[] } | null };
 const terminal = new Set(['available', 'review_needed', 'failed', 'superseded', 'deleted']);
 
 export type Notice = { title: string; body: string; variant?: 'error' | 'success' | 'info' };
@@ -243,7 +243,10 @@ export default function KnowledgeResolution({ sourceId, source = 'gap', onStatus
       <p>Your submitted answer is saved, but this submission is not available to the assistant yet.</p>
       <div className={styles.blockedReason}>
         <strong>{locationHold ? 'Reason: the location needs correction' : 'Reason processing stopped'}</strong>
-        <p>{resolution.model_explanation || resolution.failure.message}</p>
+        {(resolution.model_explanation || resolution.failure.message).split(/\n\s*\n|\n/).filter(part => part.trim()).map((part, index) => <p key={index}>{part}</p>)}
+        {Boolean(resolution.model_documents?.length) && <ul className={styles.feedbackDocuments}>
+          {resolution.model_documents!.map(document => <li key={document.label}><strong>{document.label}:</strong> {document.title}</li>)}
+        </ul>}
       </div>
       {locationHold && <>
         <p><strong>Saved applicability:</strong> {resolution.applicability?.scope === 'national' ? 'Across the Netherlands' : savedMunicipality || 'A specific location'}.</p>
